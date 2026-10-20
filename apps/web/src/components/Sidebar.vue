@@ -1,69 +1,106 @@
 <script setup lang="ts">
+import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useCatalogStore } from "@/stores";
 import { useCanvasStore } from "@/stores/canvas";
 import LibraryPanel from "@/components/LibraryPanel.vue";
 
+const { t } = useI18n();
 const catalog = useCatalogStore();
 const canvas = useCanvasStore();
 
 interface PaletteEntry {
   kind: string;
-  label: string;
-  hint: string;
+  labelKey: string;
+  hintKey: string;
 }
 
-const palette: PaletteEntry[] = [
-  { kind: "prompt", label: "Prompt", hint: "One line of text" },
-  { kind: "text", label: "Text", hint: "A block of text" },
-  { kind: "image", label: "Image", hint: "Upload an image" },
-  { kind: "generator", label: "Generator", hint: "Run a model" },
-  { kind: "stage", label: "Stage", hint: "Compose a 3D shot" },
+interface PaletteCategory {
+  id: string;
+  labelKey: string;
+  entries: PaletteEntry[];
+}
+
+/** The palette is grouped the way a production tool groups it: by what the
+ *  node is for, not by its implementation. */
+const categories: PaletteCategory[] = [
+  {
+    id: "assets",
+    labelKey: "palette.assets",
+    entries: [
+      { kind: "prompt", labelKey: "node.prompt", hintKey: "palette.promptHint" },
+      { kind: "text", labelKey: "node.text", hintKey: "palette.textHint" },
+      { kind: "image", labelKey: "node.image", hintKey: "palette.imageHint" },
+    ],
+  },
+  {
+    id: "generation",
+    labelKey: "palette.generation",
+    entries: [
+      { kind: "generator", labelKey: "node.generator", hintKey: "palette.generatorHint" },
+    ],
+  },
+  {
+    id: "three",
+    labelKey: "palette.three",
+    entries: [
+      { kind: "stage", labelKey: "node.stage", hintKey: "palette.stageHint" },
+    ],
+  },
 ];
 
-async function open(id: string): Promise<void> {
-  await canvas.open(id);
-}
-
-async function createCanvas(): Promise<void> {
-  await canvas.create("Untitled canvas");
-  await catalog.refreshCanvases();
-}
+const active = ref(categories[0]!.id);
+const current = computed(() => categories.find((category) => category.id === active.value)!);
 
 function add(kind: string): void {
-  // Lay new nodes out on a grid. Dropping them all on the same spot would
-  // stack them on top of each other and hide their handles.
+  // New nodes land in a column beside what is already there, so they do not
+  // cover the node they were dropped next to.
   const index = canvas.flowNodes.length;
-  const column = index % 3;
-  const row = Math.floor(index / 3);
-  canvas.addNode(kind, { x: 60 + column * 300, y: 60 + row * 240 });
+  const column = index % 4;
+  const row = Math.floor(index / 4);
+  canvas.addNode(kind, { x: 80 + column * 320, y: 80 + row * 250 });
 }
 </script>
 
 <template>
   <aside class="panel">
     <section class="panel__section">
-      <h2 class="panel__title">Canvases</h2>
+      <h2 class="panel__title">{{ t("sidebar.canvases") }}</h2>
       <ul class="list">
         <li v-for="item in catalog.canvases" :key="item.id">
           <button
             class="list__item"
             :class="{ 'is-active': item.id === canvas.currentId }"
-            @click="open(item.id)"
+            @click="canvas.open(item.id)"
           >
             <span>{{ item.name }}</span>
-            <span class="list__meta">{{ item.nodeCount }} nodes</span>
+            <span class="list__meta">{{ t("sidebar.nodeCounts", { count: item.nodeCount }) }}</span>
           </button>
         </li>
       </ul>
-      <button style="margin-top: 8px; width: 100%" @click="createCanvas">New canvas</button>
+      <button class="panel__wide" type="button" @click="canvas.create($t('sidebar.newCanvas'))">
+        {{ t("sidebar.newCanvas") }}
+      </button>
     </section>
 
     <section class="panel__section">
-      <h2 class="panel__title">Add a node</h2>
+      <h2 class="panel__title">{{ t("sidebar.nodes") }}</h2>
+      <div class="palette__tabs">
+        <button
+          v-for="category in categories"
+          :key="category.id"
+          class="palette__tab"
+          :class="{ 'is-active': category.id === active }"
+          type="button"
+          @click="active = category.id"
+        >
+          {{ t(category.labelKey) }}
+        </button>
+      </div>
       <div class="palette">
-        <button v-for="entry in palette" :key="entry.kind" @click="add(entry.kind)">
-          <strong>{{ entry.label }}</strong>
-          <span>{{ entry.hint }}</span>
+        <button v-for="entry in current.entries" :key="entry.kind" @click="add(entry.kind)">
+          <strong>{{ t(entry.labelKey) }}</strong>
+          <span>{{ t(entry.hintKey) }}</span>
         </button>
       </div>
     </section>

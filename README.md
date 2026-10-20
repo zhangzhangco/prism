@@ -13,6 +13,18 @@ it at a different provider when you are ready.
 
 ![The canvas editor with a prompt wired into a generator](docs/screenshot.png)
 
+<p align="center">
+  <img src="docs/screenshot-zh.png" alt="中文界面" width="820">
+</p>
+
+### Languages
+
+The interface ships in English and Simplified Chinese, and the language can be
+switched from the top bar. The choice is remembered per browser. Labels that
+come from the server — plugin names, model names, parameter names — carry a
+translation key, so a deployment can add its own models without having to
+translate them.
+
 ```
 ┌────────────┐        ┌──────────────────────┐        ┌─────────────┐
 │  prompt    │───────▶│  generator (plugin)  │───────▶│  result     │
@@ -67,6 +79,8 @@ it at a different provider when you are ready.
   ![The 3D stage](docs/stage.png)
 - **A library.** Every asset and every run is listed next to the canvas, and
   a click puts the result back on the canvas.
+- **The shortcuts a canvas editor is expected to have.** Undo and redo, copy
+  and paste, delete, save, and a command to lay the nodes out again.
 - **Honest output.** The built-in backend marks what it produces: those
   results are flagged as synthetic, labelled as such on the node, and carry a
   hatch pattern so nobody mistakes them for a model output.
@@ -209,6 +223,17 @@ except for registration and login.
 | `POST` | `/api/canvases/:id/runs` | Start a generation |
 | `GET` | `/api/runs/:id` | Read a run |
 | `GET` | `/api/canvases/:id/runs` | List the runs of a canvas |
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl`/`Cmd` + `Z` | Undo |
+| `Ctrl`/`Cmd` + `Shift` + `Z` | Redo |
+| `Ctrl`/`Cmd` + `C` / `V` | Copy / paste the selected node |
+| `Ctrl`/`Cmd` + `S` | Save now |
+| `Delete` | Remove the selected node |
+| Double-click the title | Rename the canvas |
 
 ## Development
 

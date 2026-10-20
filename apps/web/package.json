@@ -18,7 +18,8 @@
     "@vue-flow/minimap": "^1.5.4",
     "pinia": "^3.0.0",
     "three": "^0.170.0",
-    "vue": "^3.5.13"
+    "vue": "^3.5.13",
+    "vue-i18n": "^11.4.16"
   },
   "devDependencies": {
     "@types/three": "^0.170.0",

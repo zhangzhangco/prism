@@ -15,6 +15,7 @@ import type { DataType, ModelDescriptor, ModelDialect, ParamSpec } from "@prism/
 const MOCK_SIZE: ParamSpec = {
   key: "size",
   label: "Size",
+  labelKey: "common.size",
   type: "enum",
   default: "1024x1024",
   options: [
@@ -28,17 +29,19 @@ const MOCK_SIZE: ParamSpec = {
 const MOCK_QUALITY: ParamSpec = {
   key: "quality",
   label: "Quality",
+  labelKey: "common.quality",
   type: "enum",
   default: "standard",
   options: [
-    { value: "standard", label: "Standard" },
-    { value: "high", label: "High" },
+    { value: "standard", label: "Standard", labelKey: "option.standard" },
+    { value: "high", label: "High", labelKey: "option.high" },
   ],
 };
 
 const COUNT: ParamSpec = {
   key: "count",
   label: "Images",
+  labelKey: "node.images",
   type: "number",
   default: 1,
   min: 1,
@@ -51,6 +54,7 @@ const COUNT: ParamSpec = {
 const GPT_IMAGE_SIZE: ParamSpec = {
   key: "size",
   label: "Size",
+  labelKey: "common.size",
   type: "enum",
   default: "1024x1024",
   options: [
@@ -63,31 +67,34 @@ const GPT_IMAGE_SIZE: ParamSpec = {
 const GPT_IMAGE_QUALITY: ParamSpec = {
   key: "quality",
   label: "Quality",
+  labelKey: "common.quality",
   type: "enum",
   default: "high",
   options: [
-    { value: "auto", label: "Auto" },
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High" },
+    { value: "auto", label: "Auto", labelKey: "option.auto" },
+    { value: "low", label: "Low", labelKey: "option.low" },
+    { value: "medium", label: "Medium", labelKey: "option.medium" },
+    { value: "high", label: "High", labelKey: "option.high" },
   ],
 };
 
 const GPT_IMAGE_BACKGROUND: ParamSpec = {
   key: "background",
   label: "Background",
+  labelKey: "common.background",
   type: "enum",
   default: "auto",
   options: [
-    { value: "auto", label: "Auto" },
-    { value: "opaque", label: "Opaque" },
-    { value: "transparent", label: "Transparent" },
+    { value: "auto", label: "Auto", labelKey: "option.auto" },
+    { value: "opaque", label: "Opaque", labelKey: "option.opaque" },
+    { value: "transparent", label: "Transparent", labelKey: "option.transparent" },
   ],
 };
 
 const GPT_IMAGE_OUTPUT_FORMAT: ParamSpec = {
   key: "output_format",
   label: "File format",
+  labelKey: "common.fileFormat",
   type: "enum",
   default: "png",
   options: [
@@ -102,6 +109,7 @@ const GPT_IMAGE_OUTPUT_FORMAT: ParamSpec = {
 const DALL_E_SIZE: ParamSpec = {
   key: "size",
   label: "Size",
+  labelKey: "common.size",
   type: "enum",
   default: "1024x1024",
   options: [
@@ -114,11 +122,12 @@ const DALL_E_SIZE: ParamSpec = {
 const DALL_E_QUALITY: ParamSpec = {
   key: "quality",
   label: "Quality",
+  labelKey: "common.quality",
   type: "enum",
   default: "standard",
   options: [
-    { value: "standard", label: "Standard" },
-    { value: "hd", label: "HD" },
+    { value: "standard", label: "Standard", labelKey: "option.standard" },
+    { value: "hd", label: "HD", labelKey: "option.hd" },
   ],
 };
 
@@ -132,6 +141,7 @@ export function builtinModels(options: { hasRemoteProvider: boolean }): BuiltinM
       key: "prism-diffusion-v1",
       provider: "mock",
       label: "Prism Diffusion v1 (demo)",
+      labelKey: "model.prismDiffusionV1.label",
       mediaType: "image",
       dialect: "mock",
       params: [MOCK_SIZE, MOCK_QUALITY, COUNT],
@@ -142,6 +152,7 @@ export function builtinModels(options: { hasRemoteProvider: boolean }): BuiltinM
       key: "prism-diffusion-xl",
       provider: "mock",
       label: "Prism Diffusion XL (demo)",
+      labelKey: "model.prismDiffusionXl.label",
       mediaType: "image",
       dialect: "mock",
       params: [MOCK_SIZE, { ...MOCK_QUALITY, default: "high" }, COUNT],
@@ -152,6 +163,7 @@ export function builtinModels(options: { hasRemoteProvider: boolean }): BuiltinM
       key: "gpt-image-1",
       provider: "openai-compatible",
       label: "GPT Image 1",
+      labelKey: "model.gptImage1.label",
       mediaType: "image",
       dialect: "gpt-image",
       params: [
@@ -168,6 +180,7 @@ export function builtinModels(options: { hasRemoteProvider: boolean }): BuiltinM
       key: "dall-e-3",
       provider: "openai-compatible",
       label: "DALL·E 3",
+      labelKey: "model.dallE3.label",
       mediaType: "image",
       dialect: "dall-e",
       params: [DALL_E_SIZE, DALL_E_QUALITY, { ...COUNT, default: 1, max: 1 }],

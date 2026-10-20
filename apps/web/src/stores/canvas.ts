@@ -46,10 +46,66 @@ export const useCanvasStore = defineStore("canvas", () => {
   const selectedNodeId = ref<string | null>(null);
   const consoleNodeId = ref<string | null>(null);
   const viewport = ref<Viewport>({ x: 0, y: 0, zoom: 1 });
+  const snapToGrid = ref(true);
+  const showMinimap = ref(true);
+  const clipboard = shallowRef<FlowNode[]>([]);
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let inFlight: Promise<void> | null = null;
   const pollers = new Map<string, ReturnType<typeof setInterval>>();
+
+  /* ---- undo / redo ---- */
+
+  interface HistoryEntry {
+    nodes: FlowNode[];
+    edges: FlowEdge[];
+  }
+
+  const undoStack = shallowRef<HistoryEntry[]>([]);
+  const redoStack = shallowRef<HistoryEntry[]>([]);
+  let restoring = false;
+
+  function snapshot(): HistoryEntry {
+    return {
+      nodes: JSON.parse(JSON.stringify(flowNodes.value)) as FlowNode[],
+      edges: JSON.parse(JSON.stringify(flowEdges.value)) as FlowEdge[],
+    };
+  }
+
+  /** Record the state before a change, so it can be undone. */
+  function remember(): void {
+    if (restoring) return;
+    undoStack.value = [...undoStack.value.slice(-49), snapshot()];
+    redoStack.value = [];
+  }
+
+  function undo(): void {
+    const previous = undoStack.value[undoStack.value.length - 1];
+    if (!previous) return;
+    redoStack.value = [...redoStack.value, snapshot()];
+    undoStack.value = undoStack.value.slice(0, -1);
+    restoring = true;
+    flowNodes.value = previous.nodes;
+    flowEdges.value = previous.edges;
+    restoring = false;
+    scheduleSave();
+  }
+
+  function redo(): void {
+    const next = redoStack.value[redoStack.value.length - 1];
+    if (!next) return;
+    undoStack.value = [...undoStack.value, snapshot()];
+    redoStack.value = redoStack.value.slice(0, -1);
+    restoring = true;
+    flowNodes.value = next.nodes;
+    flowEdges.value = next.edges;
+    restoring = false;
+    scheduleSave();
+  }
+
+  const canUndo = computed(() => undoStack.value.length > 0);
+  const canRedo = computed(() => redoStack.value.length > 0);
+
 
   const document = computed<CanvasDocument>(() => ({
     ...nodesToDocument(flowNodes.value, flowEdges.value),
@@ -159,6 +215,7 @@ export const useCanvasStore = defineStore("canvas", () => {
   }
 
   function addNode(kind: string, position: { x: number; y: number }): FlowNode {
+    remember();
     const id = localId(kind);
     const data: Record<string, unknown> = { text: "" };
     if (kind === "image" || kind === "result") data.assets = [];
@@ -183,6 +240,7 @@ export const useCanvasStore = defineStore("canvas", () => {
     if (!connection.source || !connection.target) return;
     const target = flowNodes.value.find((node) => node.id === connection.target);
     if (!target) return;
+    remember();
 
     // A generator consumes one value per input slot, so connecting to the
     // same slot twice replaces the previous edge.
@@ -209,6 +267,7 @@ export const useCanvasStore = defineStore("canvas", () => {
   }
 
   function removeNode(nodeId: string): void {
+    remember();
     flowNodes.value = flowNodes.value.filter((node) => node.id !== nodeId);
     flowEdges.value = flowEdges.value.filter(
       (edge) => edge.source !== nodeId && edge.target !== nodeId,
@@ -408,6 +467,107 @@ export const useCanvasStore = defineStore("canvas", () => {
     runs.value = {};
     selectedNodeId.value = null;
     viewport.value = { x: 0, y: 0, zoom: 1 };
+    undoStack.value = [];
+    redoStack.value = [];
+  }
+
+  /* ---- canvas operations ---- */
+
+  function setSnapToGrid(value: boolean): void {
+    snapToGrid.value = value;
+  }
+
+  function setShowMinimap(value: boolean): void {
+    showMinimap.value = value;
+  }
+
+  function rename(name: string): void {
+    currentName.value = name.trim() || currentName.value;
+    scheduleSave();
+  }
+
+  /**
+   * Lay the nodes out in a grid.
+   *
+   * A canvas drifts as nodes are moved around. Tidy puts them back into
+   * readable columns, keeping the order they are in.
+   */
+  function tidy(): void {
+    if (flowNodes.value.length === 0) return;
+    remember();
+
+    const columnWidth = 320;
+    const rowHeight = 260;
+    const perRow = Math.max(1, Math.ceil(Math.sqrt(flowNodes.value.length * 1.6)));
+
+    const sorted = [...flowNodes.value].sort((a, b) => {
+      if (a.position.y !== b.position.y) return a.position.y - b.position.y;
+      return a.position.x - b.position.x;
+    });
+
+    const moved = sorted.map((node, index) => ({
+      ...node,
+      position: {
+        x: 60 + (index % perRow) * columnWidth,
+        y: 60 + Math.floor(index / perRow) * rowHeight,
+      },
+    }));
+    flowNodes.value = moved;
+    scheduleSave();
+  }
+
+  /** Copy the given nodes, and the wires between them, to the clipboard. */
+  function copyNodes(nodeIds: string[]): void {
+    const wanted = new Set(nodeIds);
+    clipboard.value = flowNodes.value
+      .filter((node) => wanted.has(node.id))
+      .map((node) => ({ ...node, position: { ...node.position } }));
+  }
+
+  /** Paste the clipboard, offset so it does not land on the original. */
+  function pasteNodes(): void {
+    if (clipboard.value.length === 0) return;
+    remember();
+
+    const remap = new Map<string, string>();
+    const copies = clipboard.value.map((node) => {
+      const id = localId(node.type ?? "prompt");
+      remap.set(node.id, id);
+      return {
+        ...node,
+        id,
+        position: { x: node.position.x + 40, y: node.position.y + 40 },
+      };
+    });
+
+    const extraEdges = flowEdges.value
+      .filter((edge) => wanted(edge.source) && wanted(edge.target))
+      .map((edge) => ({
+        ...edge,
+        id: localId("edge"),
+        source: remap.get(edge.source) ?? edge.source,
+        target: remap.get(edge.target) ?? edge.target,
+      }));
+
+    flowNodes.value = [...flowNodes.value, ...copies];
+    flowEdges.value = [...flowEdges.value, ...extraEdges];
+    scheduleSave();
+  }
+
+  function wanted(id: string): boolean {
+    return clipboard.value.some((node) => node.id === id);
+  }
+
+  /** Download the document, so a workflow can be shared or kept. */
+  function exportDocument(): void {
+    const payload = JSON.stringify(document.value, null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = window.document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${currentName.value || "canvas"}.prism.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   return {
@@ -424,6 +584,20 @@ export const useCanvasStore = defineStore("canvas", () => {
     consoleNodeId,
     selectedNode,
     viewport,
+    snapToGrid,
+    showMinimap,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
+    remember,
+    rename,
+    tidy,
+    copyNodes,
+    pasteNodes,
+    exportDocument,
+    setSnapToGrid,
+    setShowMinimap,
     document,
     fingerprint,
     open,

@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { Handle, Position, type NodeProps } from "@vue-flow/core";
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { effectiveParams } from "@prism/contracts";
 import { useCatalogStore } from "@/stores";
 import { useCanvasStore } from "@/stores/canvas";
 import { SOURCE_HANDLE, slotHandle, type GeneratorNodeData } from "@/graph/types";
+import { useLabel } from "@/composables/useLabel";
 
 const props = defineProps<NodeProps>();
+const { t } = useI18n();
+const { label } = useLabel();
 const catalog = useCatalogStore();
 const canvas = useCanvasStore();
 
@@ -22,26 +26,39 @@ const plugin = computed(() => catalog.pluginById.get(data.value.pluginId));
  */
 const models = computed(() => {
   const wanted = plugin.value?.outputs[0]?.dataType ?? "image";
-  return catalog.models.filter(
-    (model) => model.enabled && model.mediaType === wanted,
-  );
+  return catalog.models.filter((model) => model.enabled && model.mediaType === wanted);
 });
 
 const selectedModel = computed(
   () =>
-    catalog.models.find((model) => model.key === data.value.modelKey) ??
-    models.value[0],
+    catalog.models.find((model) => model.key === data.value.modelKey) ?? models.value[0],
 );
 
 const params = computed(() => effectiveParams(plugin.value!, selectedModel.value));
 
 const status = computed(() => data.value.status ?? "idle");
 
+const statusText = computed(() => {
+  switch (status.value) {
+    case "queued":
+      return t("node.queued");
+    case "running":
+      return t("node.running");
+    case "succeeded":
+      return t("node.succeeded");
+    case "failed":
+      return t("node.failed");
+    case "canceled":
+      return t("node.canceled");
+    default:
+      return "";
+  }
+});
+
 function onPluginChange(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
   const next = catalog.pluginById.get(value);
-  const modelKey =
-    next?.runtime.kind === "provider" ? next.runtime.modelKey : undefined;
+  const modelKey = next?.runtime.kind === "provider" ? next.runtime.modelKey : undefined;
   canvas.updateNodeData(props.id, {
     pluginId: value,
     modelKey,
@@ -68,29 +85,29 @@ function onParamChange(key: string, event: Event): void {
   <div class="node" :class="{ 'is-selected': props.selected }">
     <div class="node__header">
       <span class="node__kind node__kind--generator">G</span>
-      {{ plugin?.name ?? "Generator" }}
+      {{ plugin ? label(plugin.nameKey, plugin.name) : t("node.generator") }}
     </div>
     <div class="node__body">
       <label class="node__field">
-        <span>Plugin</span>
+        <span>{{ t("node.plugin") }}</span>
         <select :value="data.pluginId" @change="onPluginChange">
           <option v-for="item in catalog.plugins" :key="item.id" :value="item.id">
-            {{ item.name }}
+            {{ label(item.nameKey, item.name) }}
           </option>
         </select>
       </label>
 
       <label v-if="models.length" class="node__field">
-        <span>Model</span>
+        <span>{{ t("node.model") }}</span>
         <select :value="selectedModel?.key" @change="onModelChange">
           <option v-for="model in models" :key="model.key" :value="model.key">
-            {{ model.label }}
+            {{ label(model.labelKey, model.label) }}
           </option>
         </select>
       </label>
 
       <label v-for="param in params" :key="param.key" class="node__field">
-        <span>{{ param.label }}</span>
+        <span>{{ label(param.labelKey, param.label) }}</span>
         <select
           v-if="param.type === 'enum'"
           :value="String(data.params?.[param.key] ?? param.default ?? '')"
@@ -101,7 +118,7 @@ function onParamChange(key: string, event: Event): void {
             :key="option.value"
             :value="option.value"
           >
-            {{ option.label }}
+            {{ label(option.labelKey, option.label) }}
           </option>
         </select>
         <input
@@ -127,9 +144,11 @@ function onParamChange(key: string, event: Event): void {
           :disabled="status === 'queued' || status === 'running'"
           @click="canvas.run(props.id)"
         >
-          {{ status === "queued" || status === "running" ? "Running…" : "Run" }}
+          {{ status === "queued" || status === "running" ? t("node.running") : t("node.run") }}
         </button>
-        <span class="node__status" :class="`node__status--${status}`">{{ status }}</span>
+        <span v-if="statusText" class="node__status" :class="`node__status--${status}`">
+          {{ statusText }}
+        </span>
       </div>
 
       <p v-if="data.error" class="node__error">{{ data.error }}</p>

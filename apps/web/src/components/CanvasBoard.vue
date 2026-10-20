@@ -4,6 +4,7 @@ import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
 import { MiniMap } from "@vue-flow/minimap";
 import { onMounted, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import type { DataType } from "@prism/contracts";
 import { useCatalogStore } from "@/stores";
 import { useCanvasStore } from "@/stores/canvas";
@@ -16,6 +17,7 @@ import GeneratorNode from "@/nodes/GeneratorNode.vue";
 import ResultNode from "@/nodes/ResultNode.vue";
 import StageNode from "@/nodes/StageNode.vue";
 
+const { t } = useI18n();
 const canvas = useCanvasStore();
 const catalog = useCatalogStore();
 const { fitView, setViewport, viewport, onInit } = useVueFlow();
@@ -123,7 +125,7 @@ onInit(() => {
       v-model:edges="canvas.flowEdges"
       :min-zoom="0.2"
       :max-zoom="2"
-      :snap-to-grid="true"
+      :snap-to-grid="canvas.snapToGrid"
       :snap-grid="[8, 8]"
       :is-valid-connection="isValidConnection"
       @connect="onConnect"
@@ -151,13 +153,13 @@ onInit(() => {
 
       <Background :gap="16" :size="1" pattern-color="#d7dbe0" />
       <Controls />
-      <MiniMap pannable zoomable />
+      <MiniMap v-if="canvas.showMinimap" pannable zoomable />
     </VueFlow>
 
     <div class="board__overlay">
-      <span>{{ canvas.flowNodes.length }} nodes</span>
+      <span>{{ t("sidebar.nodeCounts", { count: canvas.flowNodes.length }) }}</span>
       <span>·</span>
-      <span>{{ canvas.flowEdges.length }} links</span>
+      <span>{{ t("node.connections") }} {{ canvas.flowEdges.length }}</span>
       <template v-if="canvas.dirty">
         <span>·</span>
         <span>unsaved changes</span>

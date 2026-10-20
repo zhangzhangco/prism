@@ -16,6 +16,7 @@ import type { PluginManifest } from "@prism/contracts";
 const PROMPT_PARAM = {
   key: "prompt",
   label: "Prompt",
+  labelKey: "node.promptLabel",
   type: "string" as const,
   default: "",
   help: "Describes the subject, style and lighting.",
@@ -26,9 +27,11 @@ export function builtinPlugins(): PluginManifest[] {
     {
       id: "text-to-image",
       name: "Text to Image",
+      nameKey: "plugin.textToImage.name",
       version: "1.0.0",
       category: "generation",
       summary: "Generate an image from a written description.",
+      summaryKey: "plugin.textToImage.summary",
       icon: "sparkle",
       inputs: [
         {
@@ -55,9 +58,11 @@ export function builtinPlugins(): PluginManifest[] {
     {
       id: "image-to-image",
       name: "Image to Image",
+      nameKey: "plugin.imageToImage.name",
       version: "1.0.0",
       category: "generation",
       summary: "Redraw an image while keeping its composition.",
+      summaryKey: "plugin.imageToImage.summary",
       icon: "shuffle",
       inputs: [
         {
@@ -92,9 +97,11 @@ export function builtinPlugins(): PluginManifest[] {
     {
       id: "upscale",
       name: "Upscale",
+      nameKey: "plugin.upscale.name",
       version: "1.0.0",
       category: "edit",
       summary: "Enlarge the resolution of an existing image.",
+      summaryKey: "plugin.upscale.summary",
       icon: "arrows-out",
       inputs: [
         {
@@ -115,6 +122,7 @@ export function builtinPlugins(): PluginManifest[] {
             {
               key: "factor",
               label: "Scale",
+              labelKey: "node.factor",
               type: "enum",
               default: "2x",
               options: [
@@ -134,9 +142,11 @@ export function builtinPlugins(): PluginManifest[] {
     {
       id: "prompt-sculptor",
       name: "Prompt Sculptor",
+      nameKey: "plugin.promptSculptor.name",
       version: "1.0.0",
       category: "utility",
       summary: "Expand a short prompt into a fuller description.",
+      summaryKey: "plugin.promptSculptor.summary",
       icon: "text",
       inputs: [
         {
@@ -157,6 +167,7 @@ export function builtinPlugins(): PluginManifest[] {
             {
               key: "tone",
               label: "Tone",
+              labelKey: "node.tone",
               type: "enum",
               default: "descriptive",
               options: [
@@ -168,6 +179,7 @@ export function builtinPlugins(): PluginManifest[] {
             {
               key: "maxWords",
               label: "Max words",
+              labelKey: "node.maxWords",
               type: "number",
               default: 120,
               min: 20,

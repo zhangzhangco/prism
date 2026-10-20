@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import type { StageCamera, StageDocument, StageObject, StageObjectKind } from "@prism/contracts";
 import { api } from "@/api/client";
 import { useCanvasStore } from "@/stores/canvas";
@@ -8,6 +9,7 @@ import { createStageScene, type StageScene } from "@/stage/scene";
 import { defaultStage } from "@/stage/defaults";
 
 const props = defineProps<{ nodeId: string }>();
+const { t } = useI18n();
 const canvasStore = useCanvasStore();
 
 const container = ref<HTMLDivElement | null>(null);
@@ -56,11 +58,19 @@ function replaceCamera(camera: StageCamera): void {
   });
 }
 
+const objectKinds: { kind: StageObjectKind; labelKey: string }[] = [
+  { kind: "figure", labelKey: "console.addActor" },
+  { kind: "box", labelKey: "console.addBox" },
+  { kind: "sphere", labelKey: "console.addSphere" },
+  { kind: "cylinder", labelKey: "console.addCylinder" },
+  { kind: "cone", labelKey: "console.addCone" },
+];
+
 function addObject(kind: StageObjectKind): void {
   const index = document_.value.objects.length + 1;
   const object: StageObject = {
     id: `object-${Date.now().toString(36)}-${index}`,
-    name: `${kind === "figure" ? "Actor" : "Object"} ${index}`,
+    name: `${kind === "figure" ? t("console.addActor") : t("console.addBox")} ${index}`,
     kind,
     // Place new objects beside the existing ones rather than on top of them.
     position: { x: (index - 1) * 1.6 - 1.2, y: 0, z: 0.4 },
@@ -87,7 +97,7 @@ function addCamera(): void {
   const index = document_.value.cameras.length + 1;
   const camera: StageCamera = {
     id: `camera-${Date.now().toString(36)}-${index}`,
-    name: `Camera ${index}`,
+    name: `${t("topbar.allCanvases") === "" ? "" : ""}机位 ${index}`,
     position: { x: 0, y: 1.6, z: 5.5 },
     target: { x: 0, y: 1.1, z: 0 },
     fov: 45,
@@ -101,7 +111,10 @@ function removeCamera(id: string): void {
   commit({
     ...document_.value,
     cameras,
-    activeCameraId: document_.value.activeCameraId === id ? (cameras[0]?.id ?? "") : document_.value.activeCameraId,
+    activeCameraId:
+      document_.value.activeCameraId === id
+        ? (cameras[0]?.id ?? "")
+        : document_.value.activeCameraId,
   });
   if (selectedCameraId.value === id) selectedCameraId.value = null;
 }
@@ -177,9 +190,9 @@ async function exportFrame(): Promise<void> {
     const file = new File([blob], "stage-frame.png", { type: "image/png" });
     const asset = await api.uploadAsset(canvasId, file);
     canvasStore.updateNodeData(props.nodeId, { frame: asset });
-    exportMessage.value = "Frame exported. It is now available on the node's output.";
+    exportMessage.value = t("console.exportDone");
   } catch (cause) {
-    exportMessage.value = cause instanceof Error ? cause.message : "The frame could not be exported";
+    exportMessage.value = cause instanceof Error ? cause.message : t("api.requestFailed");
   } finally {
     exporting.value = false;
   }
@@ -221,7 +234,7 @@ onMounted(async () => {
     frameHandle = requestAnimationFrame(tick);
     ready.value = true;
   } catch (cause) {
-    loadError.value = cause instanceof Error ? cause.message : "The 3D view could not be started";
+    loadError.value = cause instanceof Error ? cause.message : t("api.requestFailed");
   }
 });
 
@@ -255,16 +268,16 @@ watch(
 <template>
   <div class="console">
     <header class="console__bar">
-      <h2>Director's console</h2>
+      <h2>{{ t("console.title") }}</h2>
       <div class="console__bar-actions">
         <label class="console__toggle">
           <input type="checkbox" v-model="showShotCamera" />
-          Shot camera
+          {{ t("console.shotCamera") }}
         </label>
         <button :disabled="exporting" @click="exportFrame">
-          {{ exporting ? "Exporting…" : "Export frame" }}
+          {{ exporting ? t("common.loading") : t("console.exportFrame") }}
         </button>
-        <button class="ghost" @click="$emit('close')">Close</button>
+        <button class="ghost" @click="$emit('close')">{{ t("console.close") }}</button>
       </div>
     </header>
 
@@ -272,7 +285,7 @@ watch(
 
     <div class="console__body">
       <aside class="console__panel">
-        <h3>Objects</h3>
+        <h3>{{ t("console.objects") }}</h3>
         <ul class="console__list">
           <li
             v-for="object in document_.objects"
@@ -282,20 +295,18 @@ watch(
             <button class="console__list-item" @click="selectedObjectId = object.id">
               {{ object.name }}
             </button>
-            <button class="console__list-remove" title="Remove" @click="removeObject(object.id)">
+            <button class="console__list-remove" title="移除" @click="removeObject(object.id)">
               ×
             </button>
           </li>
         </ul>
         <div class="console__add">
-          <button @click="addObject('figure')">Actor</button>
-          <button @click="addObject('box')">Box</button>
-          <button @click="addObject('sphere')">Sphere</button>
-          <button @click="addObject('cylinder')">Cylinder</button>
-          <button @click="addObject('cone')">Cone</button>
+          <button v-for="entry in objectKinds" :key="entry.kind" @click="addObject(entry.kind)">
+            {{ t(entry.labelKey) }}
+          </button>
         </div>
 
-        <h3>Cameras</h3>
+        <h3>{{ t("console.cameras") }}</h3>
         <ul class="console__list">
           <li
             v-for="camera in document_.cameras"
@@ -308,29 +319,29 @@ watch(
             >
               {{ camera.name }}
             </button>
-            <button class="console__list-remove" title="Remove" @click="removeCamera(camera.id)">
+            <button class="console__list-remove" title="移除" @click="removeCamera(camera.id)">
               ×
             </button>
           </li>
         </ul>
-        <button @click="addCamera">Add camera</button>
+        <button @click="addCamera">{{ t("console.addCamera") }}</button>
 
-        <h3>Stage</h3>
+        <h3>{{ t("console.stage") }}</h3>
         <label class="console__check"
-          ><input type="checkbox" :checked="document_.settings.ground" @change="toggleSetting('ground')" />Ground</label
+          ><input type="checkbox" :checked="document_.settings.ground" @change="toggleSetting('ground')" />{{ t("console.ground") }}</label
         >
         <label class="console__check"
-          ><input type="checkbox" :checked="document_.settings.grid" @change="toggleSetting('grid')" />Grid</label
+          ><input type="checkbox" :checked="document_.settings.grid" @change="toggleSetting('grid')" />{{ t("console.grid") }}</label
         >
         <label class="console__check"
           ><input
             type="checkbox"
             :checked="document_.settings.backdrop"
             @change="toggleSetting('backdrop')"
-          />Backdrop</label
+          />{{ t("console.backdrop") }}</label
         >
         <label class="console__slider">
-          Light
+          {{ t("console.light") }}
           <input
             type="range"
             min="0"
@@ -348,7 +359,7 @@ watch(
         <template v-if="selectedObject">
           <h3>{{ selectedObject.name }}</h3>
           <label class="console__field">
-            <span>Position</span>
+            <span>{{ t("console.position") }}</span>
             <div class="console__triple">
               <input
                 type="number"
@@ -371,7 +382,7 @@ watch(
             </div>
           </label>
           <label class="console__field">
-            <span>Rotation</span>
+            <span>{{ t("console.rotation") }}</span>
             <div class="console__triple">
               <input
                 type="number"
@@ -394,7 +405,7 @@ watch(
             </div>
           </label>
           <label class="console__field">
-            <span>Scale</span>
+            <span>{{ t("console.scale") }}</span>
             <div class="console__triple">
               <input
                 type="number"
@@ -417,7 +428,7 @@ watch(
             </div>
           </label>
           <label class="console__field">
-            <span>Height</span>
+            <span>{{ t("console.height") }}</span>
             <input
               type="number"
               step="0.05"
@@ -426,15 +437,19 @@ watch(
             />
           </label>
           <label class="console__field">
-            <span>Colour</span>
-            <input type="color" :value="selectedObject.color" @input="updateColour(($event.target as HTMLInputElement).value)" />
+            <span>{{ t("console.colour") }}</span>
+            <input
+              type="color"
+              :value="selectedObject.color"
+              @input="updateColour(($event.target as HTMLInputElement).value)"
+            />
           </label>
         </template>
 
         <template v-if="selectedCamera">
           <h3>{{ selectedCamera.name }}</h3>
           <label class="console__field">
-            <span>Position</span>
+            <span>{{ t("console.position") }}</span>
             <div class="console__triple">
               <input
                 type="number"
@@ -457,7 +472,7 @@ watch(
             </div>
           </label>
           <label class="console__field">
-            <span>Look at</span>
+            <span>{{ t("console.lookAt") }}</span>
             <div class="console__triple">
               <input
                 type="number"
@@ -480,7 +495,7 @@ watch(
             </div>
           </label>
           <label class="console__field">
-            <span>Field of view</span>
+            <span>{{ t("console.fieldOfView") }}</span>
             <input
               type="number"
               min="10"
@@ -493,7 +508,7 @@ watch(
         </template>
 
         <p v-if="!selectedObject && !selectedCamera" class="console__hint">
-          Select an object or a camera to edit it.
+          {{ t("console.selectHint") }}
         </p>
         <p v-if="exportMessage" class="console__message">{{ exportMessage }}</p>
       </aside>

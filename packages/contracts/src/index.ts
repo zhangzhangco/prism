@@ -80,12 +80,16 @@ export type ParamType = "enum" | "number" | "string" | "boolean";
 export interface ParamOption {
   value: string;
   label: string;
+  /** Translation key for the display label, when there is one. */
+  labelKey?: string;
 }
 
 /** A parameter the user can change on a generator node. */
 export interface ParamSpec {
   key: string;
   label: string;
+  /** Translation key for the display label, when there is one. */
+  labelKey?: string;
   type: ParamType;
   default?: unknown;
   options?: ParamOption[];
@@ -107,6 +111,8 @@ export interface ParamSpec {
 export interface SlotSpec {
   key: string;
   label: string;
+  /** Translation key for the display label, when there is one. */
+  labelKey?: string;
   dataType: DataType;
   required: boolean;
   min?: number;
@@ -125,6 +131,8 @@ export interface SlotSpec {
 export interface OutputSpec {
   key: string;
   label: string;
+  /** Translation key for the display label, when there is one. */
+  labelKey?: string;
   dataType: DataType;
   params?: ParamSpec[];
 }
@@ -137,9 +145,13 @@ export type PluginRuntime =
 export interface PluginManifest {
   id: string;
   name: string;
+  /** Translation key for the display name, when there is one. */
+  nameKey?: string;
   version: string;
   category: string;
   summary: string;
+  /** Translation key for the summary, when there is one. */
+  summaryKey?: string;
   icon: string;
   inputs: SlotSpec[];
   outputs: OutputSpec[];
@@ -291,6 +303,8 @@ export interface ModelDescriptor {
   key: string;
   provider: string;
   label: string;
+  /** Translation key for the display label, when there is one. */
+  labelKey?: string;
   mediaType: DataType;
   dialect: ModelDialect;
   /** The parameters this model accepts, with the values it allows. */
