@@ -9,11 +9,10 @@
     "node": ">=22.19"
   },
   "scripts": {
-    "dev": "pnpm --parallel --filter \"./apps/*\" dev",
+    "dev": "pnpm --filter @prism/contracts build && pnpm --parallel --filter \"./apps/*\" dev",
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint",
-    "test": "pnpm -r test",
+    "typecheck": "pnpm --filter @prism/contracts build && pnpm -r typecheck",
+    "test": "pnpm --filter @prism/contracts build && pnpm -r test",
     "db:migrate": "pnpm --filter @prism/server db:migrate",
     "smoke": "node scripts/smoke.mjs"
   },
