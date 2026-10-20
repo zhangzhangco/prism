@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - run: pnpm build
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the server
+        run: pnpm --filter @prism/contracts build && pnpm --filter @prism/server build
+
+      - name: Start the server
+        run: |
+          PRISM_DATA_DIR=$RUNNER_TEMP/prism PRISM_PORT=4319 \
+            node apps/server/dist/index.js &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4319/api/health > /dev/null; then break; fi
+            sleep 1
+          done
+
+      - name: Run the smoke test
+        run: node scripts/smoke.mjs
