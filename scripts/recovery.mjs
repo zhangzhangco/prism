@@ -101,7 +101,7 @@ await api(`/api/canvases/${canvasId}`, {
           id: "gen-1",
           kind: "generator",
           position: { x: 0, y: 0 },
-          data: { pluginId: "text-to-image", params: { ratio: "1:1" } },
+          data: { pluginId: "text-to-image", params: { size: "1024x1024" } },
         },
       ],
       edges: [],
@@ -113,7 +113,7 @@ await api(`/api/canvases/${canvasId}`, {
 const started = await api(`/api/canvases/${canvasId}/runs`, {
   method: "POST",
   token,
-  body: { nodeId: "gen-1", pluginId: "text-to-image", params: { ratio: "1:1" } },
+  body: { nodeId: "gen-1", pluginId: "text-to-image", params: { size: "1024x1024" } },
 });
 const runId = started.payload?.run?.id;
 check("a run is started", typeof runId === "string");
