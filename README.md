@@ -11,6 +11,8 @@ It ships with a built-in generation backend, which means you can clone the
 repository and have a working product without any third-party credentials. Point
 it at a different provider when you are ready.
 
+![The canvas editor with a prompt wired into a generator](docs/screenshot.png)
+
 ```
 ┌────────────┐        ┌──────────────────────┐        ┌─────────────┐
 │  prompt    │───────▶│  generator (plugin)  │───────▶│  result     │
