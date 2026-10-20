@@ -50,12 +50,12 @@ const MODELS = [
 ];
 
 async function withProvider(options, run) {
-  const fake = await startFakeOpenAi({ apiKey: "test-key", ...options });
-  // The source is imported directly, so the test does not depend on a build
-  // having happened first.
+  // The source is imported before anything is started, so a failure here
+  // cannot leave a server listening and hang the test run.
   const { OpenAiCompatibleProvider } = await import(
     "../apps/server/src/providers/openai-compatible.ts"
   );
+  const fake = await startFakeOpenAi({ apiKey: "test-key", ...options });
   const provider = new OpenAiCompatibleProvider({
     baseUrl: fake.baseUrl,
     apiKey: "test-key",

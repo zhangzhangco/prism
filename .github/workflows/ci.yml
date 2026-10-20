@@ -126,4 +126,4 @@ jobs:
           PRISM_OPENAI_BASE_URL=http://127.0.0.1:4390/v1 node scripts/smoke.mjs
 
       - name: Check the adapter against the endpoint
-        run: node --test scripts/openai-adapter.test.mjs
+        run: node --import tsx --test scripts/openai-adapter.test.mjs

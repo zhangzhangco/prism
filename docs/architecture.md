@@ -257,6 +257,29 @@ Three things keep the client and the server in step:
   closed, the document is sent with a `keepalive` request, which the browser
   lets finish.
 
+### Undo, redo and the rest of the keyboard
+
+The store keeps a bounded history of the node and edge lists. Every change
+that a person makes — adding a node, connecting two, removing one, editing a
+parameter — records the previous state, so `Ctrl`/`Cmd` + `Z` steps back
+through them. The shortcut set is the one a canvas editor is expected to have:
+undo, redo, copy, paste, delete and save.
+
+### Languages
+
+The interface ships in English and Simplified Chinese, and the choice is
+remembered per browser. The catalogue entries the server sends carry a
+translation key next to the label:
+
+```json
+{ "key": "gpt-image-1", "label": "GPT Image 1", "labelKey": "model.gptImage1.label" }
+```
+
+The client prefers the key when the catalogue has an entry for it and falls
+back to the raw label otherwise, so a deployment can add its own models
+without having to translate them. The same applies to plugins, slots, output
+parameters and the values an enum can take.
+
 ## The 3D stage
 
 A stage node holds a small document of its own — objects, cameras and stage
