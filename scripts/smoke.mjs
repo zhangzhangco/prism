@@ -689,7 +689,20 @@ console.log("\nmodel catalogue");
   const listed = await api("/api/models", { token });
   const keys = (listed.payload?.models ?? []).map((model) => model.key);
   check("the retired model is no longer offered", !keys.includes("dall-e-3"), keys.join(", "));
-  check("the current image model is offered", keys.includes("gpt-image-1"), keys.join(", "));
+
+  // Whether a remote model is offered depends on the server, not on this
+  // process, so ask the server.
+  const health = await api("/api/health");
+  const providers = health.payload?.providers ?? [];
+  if (providers.includes("openai-compatible")) {
+    check("the current image model is offered", keys.includes("gpt-image-1"), keys.join(", "));
+  } else {
+    check(
+      "no remote model is offered without an endpoint",
+      !keys.some((key) => key.startsWith("gpt-")),
+      keys.join(", "),
+    );
+  }
 }
 
 console.log(failures === 0 ? "\nAll checks passed." : `\n${failures} check(s) failed.`);
