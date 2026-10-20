@@ -97,6 +97,9 @@ export function parseDocument(raw: string): CanvasDocument {
       nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
       edges: Array.isArray(parsed.edges) ? parsed.edges : [],
       viewport: parsed.viewport ?? { x: 0, y: 0, zoom: 1 },
+      // The outline is part of the document, so it has to survive a
+      // round-trip through the store.
+      ...(parsed.outline ? { outline: parsed.outline } : {}),
     };
   } catch {
     return EMPTY_DOCUMENT;

@@ -79,6 +79,14 @@ translate them.
   ![The 3D stage](docs/stage.png)
 - **A library.** Every asset and every run is listed next to the canvas, and
   a click puts the result back on the canvas.
+- **Subjects and an outline.** A production is built from reusable *subjects*:
+  actors, scenes, props and effects. They live in a library that belongs to the
+  account, so the same character can be used in as many productions as you
+  want. Each production keeps an outline of the subjects it uses, and a
+  subject can be dropped into the 3D stage or attached to a generator, where
+  its description joins the prompt and its image becomes a reference. The link
+  survives a save: reopening the canvas restores the outline, the staged object
+  and the generator's subjects.
 - **The shortcuts a canvas editor is expected to have.** Undo and redo, copy
   and paste, delete, save, and a command to lay the nodes out again.
 - **Honest output.** The built-in backend marks what it produces: those
@@ -216,6 +224,10 @@ except for registration and login.
 | `DELETE` | `/api/canvases/:id` | Delete a canvas |
 | `GET` | `/api/plugins` | Plugin catalog |
 | `GET` | `/api/models` | Model catalog |
+| `GET` | `/api/subjects` | The subject library, with `?kind=` and `?q=` filters |
+| `POST` | `/api/subjects` | Create a subject |
+| `PATCH` | `/api/subjects/:id` | Update a subject |
+| `DELETE` | `/api/subjects/:id` | Remove a subject |
 | `GET` | `/api/assets` | Every asset of the account |
 | `GET` | `/api/canvases/:id/assets` | Assets of one canvas |
 | `POST` | `/api/canvases/:id/assets` | Upload a file |

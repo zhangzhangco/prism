@@ -88,6 +88,21 @@ const MIGRATIONS: string[] = [
   ALTER TABLE runs ADD COLUMN model_key TEXT NOT NULL DEFAULT '';
   ALTER TABLE runs ADD COLUMN inputs TEXT;
   `,
+  `
+  CREATE TABLE subjects (
+    id                  TEXT PRIMARY KEY,
+    user_id             TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind                TEXT NOT NULL,
+    name                TEXT NOT NULL,
+    description         TEXT NOT NULL DEFAULT '',
+    tags                TEXT NOT NULL DEFAULT '[]',
+    data                TEXT NOT NULL DEFAULT '{}',
+    thumbnail_asset_id  TEXT,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+  );
+  CREATE INDEX idx_subjects_user ON subjects(user_id, kind, name);
+  `,
 ];
 
 export function openDatabase(config: ServerConfig): Db {

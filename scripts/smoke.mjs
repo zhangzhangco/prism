@@ -467,5 +467,123 @@ if (process.env.PRISM_OPENAI_BASE_URL) {
   }
 }
 
+console.log("\noutline round trip");
+{
+  const outlineCanvas = await api("/api/canvases", {
+    method: "POST",
+    token,
+    body: { name: "Outline canvas" },
+  });
+  const outlineId = outlineCanvas.payload?.canvas?.id;
+  const outline = { actors: ["sub_1"], scenes: [], props: ["sub_2"], effects: ["sub_3"] };
+
+  await api(`/api/canvases/${outlineId}`, {
+    method: "PATCH",
+    token,
+    body: {
+      document: {
+        version: 1,
+        nodes: [],
+        edges: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+        outline,
+      },
+    },
+  });
+
+  const readBack = await api(`/api/canvases/${outlineId}`, { token });
+  check(
+    "the outline survives a save and a read",
+    JSON.stringify(readBack.payload?.canvas?.document?.outline) === JSON.stringify(outline),
+    JSON.stringify(readBack.payload?.canvas?.document?.outline),
+  );
+}
+
+console.log("\nsubjects");
+{
+  const created = await api("/api/subjects", {
+    method: "POST",
+    token,
+    body: {
+      kind: "actor",
+      name: "Harbour master",
+      description: "a quiet figure in a heavy coat",
+      tags: ["actor", "harbour"],
+      data: { height: 1.8, color: "#4c6ef5", build: "regular" },
+    },
+  });
+  check("a subject can be created", created.status === 201, `got ${created.status}`);
+  const subjectId = created.payload?.subject?.id;
+
+  const list = await api("/api/subjects", { token });
+  check("the subject appears in the library", (list.payload?.subjects ?? []).some((s) => s.id === subjectId));
+
+  const searched = await api("/api/subjects?q=harbour", { token });
+  check(
+    "the library can be searched",
+    (searched.payload?.subjects ?? []).length === 1,
+    `${(searched.payload?.subjects ?? []).length} result(s)`,
+  );
+
+  const byKind = await api("/api/subjects?kind=prop", { token });
+  check("the library can be filtered by kind", (byKind.payload?.subjects ?? []).length === 0);
+
+  const renamed = await api(`/api/subjects/${subjectId}`, {
+    method: "PATCH",
+    token,
+    body: { name: "Harbour keeper" },
+  });
+  check("a subject can be renamed", renamed.payload?.subject?.name === "Harbour keeper");
+
+  // A subject attached to a generator must reach the prompt.
+  const subjectCanvas = await api("/api/canvases", {
+    method: "POST",
+    token,
+    body: { name: "Subject canvas" },
+  });
+  const subjectCanvasId = subjectCanvas.payload?.canvas?.id;
+  await api(`/api/canvases/${subjectCanvasId}`, {
+    method: "PATCH",
+    token,
+    body: {
+      document: {
+        version: 1,
+        nodes: [
+          {
+            id: "gen-1",
+            kind: "generator",
+            position: { x: 0, y: 0 },
+            data: { pluginId: "prompt-sculptor", params: { tone: "concise" }, subjects: [subjectId] },
+          },
+        ],
+        edges: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+        outline: { actors: [subjectId], scenes: [], props: [], effects: [] },
+      },
+    },
+  });
+
+  const subjectRun = await api(`/api/canvases/${subjectCanvasId}/runs`, {
+    method: "POST",
+    token,
+    body: { nodeId: "gen-1", pluginId: "prompt-sculptor", params: { tone: "concise" } },
+  });
+  check("a run with a subject is accepted", subjectRun.status === 202, `got ${subjectRun.status}`);
+  const subjectFinal = await waitForRun(token, subjectRun.payload?.run?.id);
+  check(
+    "the run with a subject finishes",
+    subjectFinal?.status === "succeeded",
+    `status ${subjectFinal?.status} ${subjectFinal?.error ?? ""}`,
+  );
+  check(
+    "the subject reached the prompt",
+    (subjectFinal?.tasks?.[0]?.text ?? "").includes("Harbour keeper"),
+    (subjectFinal?.tasks?.[0]?.text ?? "").slice(0, 160),
+  );
+
+  const removed = await api(`/api/subjects/${subjectId}`, { method: "DELETE", token });
+  check("a subject can be removed", removed.status === 204, `got ${removed.status}`);
+}
+
 console.log(failures === 0 ? "\nAll checks passed." : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

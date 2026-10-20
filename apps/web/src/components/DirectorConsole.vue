@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import type { StageCamera, StageDocument, StageObject, StageObjectKind } from "@prism/contracts";
+import type { StageCamera, StageDocument, StageObject, StageObjectKind, Subject } from "@prism/contracts";
 import { api } from "@/api/client";
 import { useCanvasStore } from "@/stores/canvas";
+import { useSubjectStore } from "@/stores/subjects";
 import { createOrbit, type OrbitHandle } from "@/stage/orbit";
 import { createStageScene, type StageScene } from "@/stage/scene";
 import { defaultStage } from "@/stage/defaults";
@@ -11,6 +12,7 @@ import { defaultStage } from "@/stage/defaults";
 const props = defineProps<{ nodeId: string }>();
 const { t } = useI18n();
 const canvasStore = useCanvasStore();
+const library = useSubjectStore();
 
 const container = ref<HTMLDivElement | null>(null);
 const scene = shallowRef<StageScene | null>(null);
@@ -66,8 +68,21 @@ const objectKinds: { kind: StageObjectKind; labelKey: string }[] = [
   { kind: "cone", labelKey: "console.addCone" },
 ];
 
-function addObject(kind: StageObjectKind): void {
-  const index = document_.value.objects.length + 1;
+/** The library entries that can be placed in a stage. */
+const librarySubjects = computed(() =>
+  library.subjects.filter(
+    (subject) => subject.kind === "actor" || subject.kind === "prop" || subject.kind === "scene",
+  ),
+);
+
+/** Place a library subject in the stage, keeping the link to the library. */
+function placeFromLibrary(subject: Subject): void {
+  const placed = canvasStore.addSubjectToStage(subject);
+  exportMessage.value = placed ? t("subject.placedInStage") : t("subject.effectNotInStage");
+  if (placed) scene.value?.rebuildObjects();
+}
+
+function addObject(kind: StageObjectKind): void {  const index = document_.value.objects.length + 1;
   const object: StageObject = {
     id: `object-${Date.now().toString(36)}-${index}`,
     name: `${kind === "figure" ? t("console.addActor") : t("console.addBox")} ${index}`,
@@ -305,6 +320,20 @@ watch(
             {{ t(entry.labelKey) }}
           </button>
         </div>
+
+        <template v-if="librarySubjects.length">
+          <h3>{{ t("subject.toStage") }}</h3>
+          <div class="console__add">
+            <button
+              v-for="subject in librarySubjects"
+              :key="subject.id"
+              :title="subject.description"
+              @click="placeFromLibrary(subject)"
+            >
+              {{ subject.name }}
+            </button>
+          </div>
+        </template>
 
         <h3>{{ t("console.cameras") }}</h3>
         <ul class="console__list">

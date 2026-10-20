@@ -1,8 +1,18 @@
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 import type { Connection } from "@vue-flow/core";
-import type { AssetRef, CanvasDocument, PluginManifest, Run, Viewport } from "@prism/contracts";
-import { documentFingerprint, effectiveParams, reconcileParams } from "@prism/contracts";
+import type {
+  AssetRef,
+  CanvasDocument,
+  Outline,
+  StageObject,
+  PluginManifest,
+  Run,
+  Subject,
+  SubjectKind,
+  Viewport,
+} from "@prism/contracts";
+import { documentFingerprint, effectiveParams, EMPTY_OUTLINE, reconcileParams } from "@prism/contracts";
 import { api, ApiError } from "@/api/client";
 import { documentToEdges, documentToNodes, nodesToDocument } from "@/graph/convert";
 import { SOURCE_HANDLE, slotHandle, type FlowEdge, type FlowNode, type GeneratorNodeData } from "@/graph/types";
@@ -49,6 +59,8 @@ export const useCanvasStore = defineStore("canvas", () => {
   const snapToGrid = ref(true);
   const showMinimap = ref(true);
   const clipboard = shallowRef<FlowNode[]>([]);
+  const outline = ref<Outline>({ ...EMPTY_OUTLINE });
+  const pickerOpen = ref(false);
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let inFlight: Promise<void> | null = null;
@@ -110,6 +122,7 @@ export const useCanvasStore = defineStore("canvas", () => {
   const document = computed<CanvasDocument>(() => ({
     ...nodesToDocument(flowNodes.value, flowEdges.value),
     viewport: viewport.value,
+    outline: outline.value,
   }));
   const fingerprint = computed(() => documentFingerprint(document.value));
   const selectedNode = computed(() =>
@@ -120,6 +133,7 @@ export const useCanvasStore = defineStore("canvas", () => {
     flowNodes.value = documentToNodes(next);
     flowEdges.value = documentToEdges(next);
     viewport.value = next.viewport ?? { x: 0, y: 0, zoom: 1 };
+    outline.value = { ...EMPTY_OUTLINE, ...(next.outline ?? {}) };
     dirty.value = false;
   }
 
@@ -471,6 +485,144 @@ export const useCanvasStore = defineStore("canvas", () => {
     redoStack.value = [];
   }
 
+  /* ---- subjects: the outline, the stage and the generators ---- */
+
+  const outlineKeyFor = (kind: SubjectKind): keyof Outline =>
+    kind === "actor" ? "actors" : kind === "scene" ? "scenes" : kind === "prop" ? "props" : "effects";
+
+  /** Record a subject as part of this production. */
+  function addToOutline(subject: { id: string; kind: SubjectKind }): void {
+    const key = outlineKeyFor(subject.kind);
+    if (outline.value[key].includes(subject.id)) return;
+    outline.value = { ...outline.value, [key]: [...outline.value[key], subject.id] };
+    scheduleSave();
+  }
+
+  function removeFromOutline(subjectId: string, kind: SubjectKind): void {
+    const key = outlineKeyFor(kind);
+    if (!outline.value[key].includes(subjectId)) return;
+    outline.value = {
+      ...outline.value,
+      [key]: outline.value[key].filter((id) => id !== subjectId),
+    };
+    scheduleSave();
+  }
+
+  function inOutline(subjectId: string): boolean {
+    return (
+      outline.value.actors.includes(subjectId) ||
+      outline.value.scenes.includes(subjectId) ||
+      outline.value.props.includes(subjectId) ||
+      outline.value.effects.includes(subjectId)
+    );
+  }
+
+  /** Attach a subject to a generator, so it joins the prompt. */
+  function attachSubjectToNode(nodeId: string, subjectId: string): void {
+    const node = flowNodes.value.find((item) => item.id === nodeId);
+    if (!node) return;
+    const subjects = Array.isArray((node.data as { subjects?: string[] }).subjects)
+      ? ((node.data as { subjects: string[] }).subjects ?? [])
+      : [];
+    if (subjects.includes(subjectId)) return;
+    node.data = { ...(node.data ?? {}), subjects: [...subjects, subjectId] };
+    flowNodes.value = [...flowNodes.value];
+    scheduleSave();
+  }
+
+  function detachSubjectFromNode(nodeId: string, subjectId: string): void {
+    const node = flowNodes.value.find((item) => item.id === nodeId);
+    if (!node) return;
+    const subjects = Array.isArray((node.data as { subjects?: string[] }).subjects)
+      ? ((node.data as { subjects: string[] }).subjects ?? [])
+      : [];
+    node.data = {
+      ...(node.data ?? {}),
+      subjects: subjects.filter((id) => id !== subjectId),
+    };
+    flowNodes.value = [...flowNodes.value];
+    scheduleSave();
+  }
+
+  function subjectsOfNode(nodeId: string): string[] {
+    const node = flowNodes.value.find((item) => item.id === nodeId);
+    const subjects = (node?.data as { subjects?: string[] } | undefined)?.subjects;
+    return Array.isArray(subjects) ? subjects : [];
+  }
+
+  /** The stage node of this canvas, if there is one. */
+  function stageNode(): FlowNode | undefined {
+    return flowNodes.value.find((node) => node.type === "stage");
+  }
+
+  /**
+   * Put a subject into the 3D stage.
+   *
+   * An actor becomes a figure and a prop becomes a primitive. A scene is not an
+   * object but a set of stage settings, so it is applied to the stage
+   * instead. The object keeps a link to the subject, so the link survives a
+   * save and the object can be traced back to the library.
+   */
+  function addSubjectToStage(subject: Subject): boolean {
+    const stage = stageNode();
+    if (!stage) return false;
+
+    const stageData = (stage.data ?? {}) as {
+      stage?: {
+        objects: StageObject[];
+        settings: { ground: boolean; grid: boolean; backdrop: boolean; light: number };
+      };
+    };
+    const current = stageData.stage ?? defaultStage();
+
+    if (subject.kind === "scene") {
+      const spec = subject.data as unknown as Record<string, unknown>;
+      const settings = {
+        ...current.settings,
+        light: typeof spec.light === "number" ? spec.light : current.settings.light,
+      };
+      stage.data = {
+        ...(stage.data ?? {}),
+        stage: { ...current, settings },
+      };
+      flowNodes.value = [...flowNodes.value];
+      scheduleSave();
+      return true;
+    }
+
+    if (subject.kind === "effect") return false;
+
+    const spec = subject.data as unknown as Record<string, unknown>;
+    const object: StageObject = {
+      id: localId("object"),
+      name: subject.name,
+      kind: (subject.kind === "actor"
+        ? "figure"
+        : ((spec.shape as string) ?? "box")) as StageObject["kind"],
+      subjectId: subject.id,
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      color: typeof spec.color === "string" ? spec.color : "#4c6ef5",
+      height:
+        subject.kind === "actor"
+          ? typeof spec.height === "number"
+            ? spec.height
+            : 1.75
+          : typeof spec.size === "number"
+            ? spec.size
+            : 1,
+    };
+
+    stage.data = {
+      ...(stage.data ?? {}),
+      stage: { ...current, objects: [...current.objects, object] },
+    };
+    flowNodes.value = [...flowNodes.value];
+    scheduleSave();
+    return true;
+  }
+
   /* ---- canvas operations ---- */
 
   function setSnapToGrid(value: boolean): void {
@@ -598,6 +750,16 @@ export const useCanvasStore = defineStore("canvas", () => {
     exportDocument,
     setSnapToGrid,
     setShowMinimap,
+    outline,
+    pickerOpen,
+    addToOutline,
+    removeFromOutline,
+    inOutline,
+    attachSubjectToNode,
+    detachSubjectFromNode,
+    subjectsOfNode,
+    stageNode,
+    addSubjectToStage,
     document,
     fingerprint,
     open,

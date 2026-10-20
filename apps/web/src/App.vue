@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useCatalogStore } from "@/stores";
+import { useSubjectStore } from "@/stores/subjects";
 import { useCanvasStore } from "@/stores/canvas";
 import { useSessionStore } from "@/stores";
 import SignInView from "@/components/SignInView.vue";
@@ -10,10 +11,12 @@ import Sidebar from "@/components/Sidebar.vue";
 import CanvasBoard from "@/components/CanvasBoard.vue";
 import Inspector from "@/components/Inspector.vue";
 import DirectorConsole from "@/components/DirectorConsole.vue";
+import CanvasPicker from "@/components/CanvasPicker.vue";
 
 const { t } = useI18n();
 const session = useSessionStore();
 const catalog = useCatalogStore();
+const library = useSubjectStore();
 const canvas = useCanvasStore();
 
 const ready = ref(false);
@@ -85,7 +88,7 @@ onMounted(async () => {
   await session.restore();
   if (session.isAuthenticated) {
     try {
-      await catalog.load();
+      await Promise.all([catalog.load(), library.load()]);
       if (catalog.canvases.length > 0) {
         await canvas.open(catalog.canvases[0]!.id);
       }
@@ -127,6 +130,8 @@ onBeforeUnmount(() => {
         :node-id="canvas.consoleNodeId"
         @close="canvas.consoleNodeId = null"
       />
+
+      <CanvasPicker v-if="canvas.pickerOpen" @close="canvas.pickerOpen = false" />
     </template>
 
     <p v-if="bootError" class="boot-error">{{ bootError }}</p>

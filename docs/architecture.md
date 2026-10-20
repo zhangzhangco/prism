@@ -280,6 +280,36 @@ back to the raw label otherwise, so a deployment can add its own models
 without having to translate them. The same applies to plugins, slots, output
 parameters and the values an enum can take.
 
+## Subjects and the outline
+
+A production is built from reusable **subjects**: actors, scenes, props and
+effects. A subject belongs to the account rather than to one canvas, so the
+same character can be used in as many productions as the account wants. What a
+production uses is recorded in its **outline**, which lives inside the canvas
+document:
+
+```json
+{
+  "outline": { "actors": ["sub_…"], "scenes": [], "props": ["sub_…"], "effects": [] }
+}
+```
+
+Because the outline is part of the document, it is saved and restored with
+everything else.
+
+A subject reaches a run in two ways, and both leave a link behind:
+
+- **Into the 3D stage.** The staged object keeps the id of the subject it
+  came from, so it can be traced back to the library and picks up changes made
+  to the subject later.
+- **Into a generator.** The generator keeps the ids of its subjects. When the
+  run is accepted, the server resolves them: the description of each subject
+  becomes part of the prompt, and its thumbnail — if it has one — becomes a
+  reference image in the first slot that accepts images.
+
+The resolution happens when the run is accepted, so the snapshot the worker
+uses already contains the subject's contribution.
+
 ## The 3D stage
 
 A stage node holds a small document of its own — objects, cameras and stage

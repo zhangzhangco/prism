@@ -4,6 +4,7 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { effectiveParams } from "@prism/contracts";
 import { useCatalogStore } from "@/stores";
+import { useSubjectStore } from "@/stores/subjects";
 import { useCanvasStore } from "@/stores/canvas";
 import { SOURCE_HANDLE, slotHandle, type GeneratorNodeData } from "@/graph/types";
 import { useLabel } from "@/composables/useLabel";
@@ -12,6 +13,7 @@ const props = defineProps<NodeProps>();
 const { t } = useI18n();
 const { label } = useLabel();
 const catalog = useCatalogStore();
+const library = useSubjectStore();
 const canvas = useCanvasStore();
 
 const data = computed(() => props.data as unknown as GeneratorNodeData);
@@ -37,6 +39,13 @@ const selectedModel = computed(
 const params = computed(() => effectiveParams(plugin.value!, selectedModel.value));
 
 const status = computed(() => data.value.status ?? "idle");
+
+/** The subjects attached to this node. */
+const attachedSubjects = computed(() =>
+  canvas.subjectsOfNode(props.id)
+    .map((id) => library.byId.get(id))
+    .filter((subject): subject is NonNullable<typeof subject> => Boolean(subject)),
+);
 
 const statusText = computed(() => {
   switch (status.value) {
@@ -137,6 +146,20 @@ function onParamChange(key: string, event: Event): void {
           @input="onParamChange(param.key, $event)"
         />
       </label>
+
+      <div v-if="attachedSubjects.length" class="node__subjects">
+        <span class="node__subjects-label">{{ t("subject.toGenerator") }}</span>
+        <span v-for="subject in attachedSubjects" :key="subject.id" class="node__subject">
+          {{ subject.name }}
+          <button
+            class="node__subject-remove"
+            :title="t('common.remove')"
+            @click="canvas.detachSubjectFromNode(props.id, subject.id)"
+          >
+            ×
+          </button>
+        </span>
+      </div>
 
       <div class="node__actions">
         <button

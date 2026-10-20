@@ -3,8 +3,11 @@ import type { ModelDescriptor, PluginManifest, Run, RunRequest } from "@prism/co
 import { documentFingerprint } from "@prism/contracts";
 import { resolveInputs, slotKeyFromHandle } from "../graph.js";
 import { validateParams } from "../models/params.js";
+import { subjectContributions } from "../subjects.js";
+import type { AssetsStore } from "../store/assets.js";
 import type { CanvasesStore } from "../store/canvases.js";
 import type { RunsStore } from "../store/runs.js";
+import type { SubjectsStore } from "../store/subjects.js";
 import type { UsersStore } from "../store/users.js";
 import { authenticate, currentUserId } from "./auth.js";
 
@@ -12,6 +15,9 @@ export interface RunRouteContext {
   runs: RunsStore;
   users: UsersStore;
   canvases: CanvasesStore;
+  subjects: SubjectsStore;
+  assets: AssetsStore;
+  publicBaseUrl: string;
   pluginById: (id: string) => PluginManifest | undefined;
   modelById: (key: string) => ModelDescriptor | undefined;
 }
@@ -132,6 +138,50 @@ export function registerRunRoutes(app: FastifyInstance, context: RunRouteContext
           ...(value.mime ? { mime: value.mime } : {}),
           ...(value.text !== undefined ? { text: value.text } : {}),
         }));
+      }
+
+      // Subjects attached to the node join the run: their descriptions
+      // become part of the prompt and their thumbnails become references.
+      const node = canvas.document.nodes.find((candidate) => candidate.id === body.nodeId);
+      const subjectIds = Array.isArray((node?.data as { subjects?: unknown })?.subjects)
+        ? ((node?.data as { subjects: string[] }).subjects ?? [])
+        : [];
+      const contributions = subjectContributions(
+        subjectIds,
+        context.subjects.getMany(userId, subjectIds),
+        context.assets,
+        userId,
+        context.publicBaseUrl,
+      );
+
+      if (contributions.length > 0) {
+        const promptParts = contributions.map((entry) => entry.text).filter(Boolean);
+        if (promptParts.length > 0) {
+          const promptKey = plugin.inputs.find((slot) => slot.dataType === "text")?.key;
+          if (promptKey) {
+            const existing = (snapshot[promptKey] as { text?: string }[] | undefined) ?? [];
+            snapshot[promptKey] = [
+              ...existing,
+              ...promptParts.map((text) => ({ kind: "text", text })),
+            ];
+          }
+        }
+
+        const imageKey = plugin.inputs.find((slot) => slot.dataType === "image")?.key;
+        if (imageKey) {
+          const references = contributions
+            .filter((entry) => entry.thumbnail)
+            .map((entry) => ({
+              kind: "image",
+              assetId: entry.thumbnail!.assetId,
+              url: entry.thumbnail!.url,
+              mime: entry.thumbnail!.mime,
+            }));
+          if (references.length > 0) {
+            const existing = (snapshot[imageKey] as unknown[] | undefined) ?? [];
+            snapshot[imageKey] = [...existing, ...references];
+          }
+        }
       }
 
       const hasReference = resolved.some(

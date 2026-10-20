@@ -127,7 +127,7 @@ function choose(code: LocaleCode): void {
       <button class="topbar__item" type="button" @click="canvas.exportDocument()">
         {{ t("topbar.shareWorkflow") }}
       </button>
-      <button class="topbar__item" type="button" @click="canvas.open(catalog.canvases[0]?.id ?? '')">
+      <button class="topbar__item" type="button" @click="canvas.pickerOpen = true">
         {{ t("topbar.allCanvases") }}
       </button>
     </nav>

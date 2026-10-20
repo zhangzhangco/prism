@@ -12,9 +12,11 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerCanvasRoutes } from "./routes/canvases.js";
 import { registerCatalogRoutes } from "./routes/catalog.js";
 import { registerRunRoutes } from "./routes/runs.js";
+import { registerSubjectRoutes } from "./routes/subjects.js";
 import { AssetsStore } from "./store/assets.js";
 import { CanvasesStore } from "./store/canvases.js";
 import { RunsStore } from "./store/runs.js";
+import { SubjectsStore } from "./store/subjects.js";
 import { UsersStore } from "./store/users.js";
 
 export interface PrismServer {
@@ -30,6 +32,7 @@ export async function buildServer(config: ServerConfig): Promise<PrismServer> {
   const canvases = new CanvasesStore(db);
   const assets = new AssetsStore(db);
   const runs = new RunsStore(db);
+  const subjects = new SubjectsStore(db);
 
   const plugins = builtinPlugins();
   const models = builtinModels({ hasRemoteProvider: config.openAiCompatible !== null });
@@ -64,9 +67,14 @@ export async function buildServer(config: ServerConfig): Promise<PrismServer> {
     runs,
     users,
     canvases,
+    subjects,
+    assets,
+    publicBaseUrl: config.publicBaseUrl,
     pluginById: (id) => plugins.find((plugin) => plugin.id === id),
     modelById: (key) => models.find((model) => model.key === key),
   });
+
+  registerSubjectRoutes(app, { subjects, assets, users, publicBaseUrl: config.publicBaseUrl });
 
   const runner = new Runner({
     config,

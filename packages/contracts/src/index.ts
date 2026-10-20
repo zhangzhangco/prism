@@ -161,6 +161,79 @@ export interface PluginManifest {
 }
 
 /* ------------------------------------------------------------------ *
+ * Subjects
+ * ------------------------------------------------------------------ */
+
+/** The four kinds of thing a production is built from. */
+export type SubjectKind = "actor" | "scene" | "prop" | "effect";
+
+/** What a subject of each kind describes. */
+export interface ActorSpec {
+  height: number;
+  color: string;
+  build: "slim" | "regular" | "heavy";
+}
+
+export interface SceneSpec {
+  backdropColor: string;
+  groundColor: string;
+  light: number;
+  description: string;
+}
+
+export interface PropSpec {
+  shape: "box" | "sphere" | "cylinder" | "cone";
+  size: number;
+  color: string;
+}
+
+export interface EffectSpec {
+  style: string;
+  description: string;
+}
+
+export type SubjectSpec = ActorSpec | SceneSpec | PropSpec | EffectSpec;
+
+/**
+ * A reusable piece of a production.
+ *
+ * A subject belongs to the account, not to one canvas, so the same actor or
+ * prop can be used in as many productions as the account wants. What a
+ * production uses is recorded in its outline.
+ */
+export interface Subject {
+  id: string;
+  kind: SubjectKind;
+  name: string;
+  description: string;
+  tags: string[];
+  /** The kind-specific shape of the subject. */
+  data: SubjectSpec;
+  /** An optional image that stands for the subject. */
+  thumbnailAssetId: string | null;
+  /** A ready-to-use link to that image, filled in by the server. */
+  thumbnailUrl?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * What a production is made of.
+ *
+ * The outline holds the ids of the subjects the production uses, grouped by
+ * kind. It lives inside the canvas document, so it is saved and restored with
+ * everything else.
+ */
+export interface Outline {
+  actors: string[];
+  scenes: string[];
+  props: string[];
+  effects: string[];
+}
+
+export const EMPTY_OUTLINE: Outline = { actors: [], scenes: [], props: [], effects: [] };
+
+/* ------------------------------------------------------------------ *
  * Canvas document
  * ------------------------------------------------------------------ */
 
@@ -189,6 +262,11 @@ export interface StageObject {
   id: string;
   name: string;
   kind: StageObjectKind;
+  /**
+   * The subject this object came from, when it was placed from the library.
+   * The link survives a save, so the object keeps its identity.
+   */
+  subjectId?: string;
   position: StageVector;
   /** Rotation in degrees. */
   rotation: StageVector;
@@ -260,6 +338,8 @@ export interface CanvasDocument {
   nodes: CanvasNode[];
   edges: CanvasEdge[];
   viewport: Viewport;
+  /** What this production is made of. */
+  outline?: Outline;
 }
 
 export interface CanvasSummary {

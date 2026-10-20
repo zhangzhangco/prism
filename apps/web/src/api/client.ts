@@ -7,6 +7,9 @@ import type {
   PluginManifest,
   Run,
   SessionUser,
+  Subject,
+  SubjectKind,
+  SubjectSpec,
 } from "@prism/contracts";
 
 export class ApiError extends Error {
@@ -118,6 +121,32 @@ export const api = {
   listRuns: (canvasId: string) => request<{ runs: Run[] }>(`/api/canvases/${canvasId}/runs`),
 
   listAssets: () => request<{ assets: AssetRef[] }>("/api/assets"),
+
+  listSubjects: (params?: { kind?: string; q?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.kind) query.set("kind", params.kind);
+    if (params?.q) query.set("q", params.q);
+    const suffix = query.toString();
+    return request<{ subjects: Subject[] }>(`/api/subjects${suffix ? `?${suffix}` : ""}`);
+  },
+
+  createSubject: (body: {
+    kind: SubjectKind;
+    name: string;
+    description?: string;
+    tags?: string[];
+    data: SubjectSpec;
+    thumbnailAssetId?: string | null;
+  }) => request<{ subject: Subject }>("/api/subjects", { method: "POST", body: JSON.stringify(body) }),
+
+  updateSubject: (
+    id: string,
+    body: Partial<
+      Pick<Subject, "name" | "description" | "tags" | "data" | "kind" | "thumbnailAssetId">
+    >,
+  ) => request<{ subject: Subject }>(`/api/subjects/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+
+  deleteSubject: (id: string) => request<void>(`/api/subjects/${id}`, { method: "DELETE" }),
 
   uploadAsset: async (canvasId: string, file: File): Promise<AssetRef> => {
     const form = new FormData();
