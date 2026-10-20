@@ -17,6 +17,10 @@ it at a different provider when you are ready.
   <img src="docs/screenshot-zh.png" alt="中文界面" width="820">
 </p>
 
+<p align="center">
+  <img src="docs/library.png" alt="主体库" width="820">
+</p>
+
 ### Languages
 
 The interface ships in English and Simplified Chinese, and the language can be
