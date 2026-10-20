@@ -20,8 +20,11 @@ import {
  * - The GPT Image family returns base64 unconditionally and rejects the
  *   legacy `response_format` field, so it is never sent. It also takes
  *   `background` and `output_format`.
- * - The DALL·E family expects `response_format` and knows only its own
- *   quality names, and it cannot edit an image.
+ * - The older dialect expects `response_format` and knows only its own
+ *   quality names, and it cannot work from a reference image. OpenAI retired
+ *   its own DALL·E 3 endpoint in May 2026, so the built-in catalogue does
+ *   not offer it, but compatible servers still implement that dialect and the
+ *   adapter keeps speaking it.
  */
 
 interface ImageResponse {

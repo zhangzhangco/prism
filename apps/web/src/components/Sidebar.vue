@@ -77,6 +77,12 @@ function add(kind: string): void {
   canvas.addNode(kind, { x: 80 + column * 320, y: 80 + row * 250 });
 }
 
+/** Start a drag that drops a node type onto the canvas. */
+function startDrag(event: DragEvent, payload: string): void {
+  event.dataTransfer?.setData("application/prism", payload);
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy";
+}
+
 </script>
 
 <template>
@@ -133,7 +139,13 @@ function add(kind: string): void {
           </button>
         </div>
         <div class="palette">
-          <button v-for="entry in current.entries" :key="entry.kind" @click="add(entry.kind)">
+          <button
+            v-for="entry in current.entries"
+            :key="entry.kind"
+            draggable="true"
+            @dragstart="startDrag($event, 'node:' + entry.kind)"
+            @click="add(entry.kind)"
+          >
             <strong>{{ t(entry.labelKey) }}</strong>
             <span>{{ t(entry.hintKey) }}</span>
           </button>

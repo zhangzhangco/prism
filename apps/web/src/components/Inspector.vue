@@ -24,6 +24,8 @@ const kindLabel = computed(() => {
       return t("node.image");
     case "result":
       return t("node.result");
+    case "subject":
+      return t("node.subject");
     case "stage":
       return t("node.stage");
     case "generator":

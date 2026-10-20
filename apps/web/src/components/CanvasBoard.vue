@@ -7,12 +7,14 @@ import { onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { DataType } from "@prism/contracts";
 import { useCatalogStore } from "@/stores";
+import { useSubjectStore } from "@/stores/subjects";
 import { useCanvasStore } from "@/stores/canvas";
 import { nodeDataType } from "@/graph/types";
 import type { FlowNode } from "@/graph/types";
 import PromptNode from "@/nodes/PromptNode.vue";
 import TextNode from "@/nodes/TextNode.vue";
 import ImageNode from "@/nodes/ImageNode.vue";
+import SubjectNode from "@/nodes/SubjectNode.vue";
 import GeneratorNode from "@/nodes/GeneratorNode.vue";
 import ResultNode from "@/nodes/ResultNode.vue";
 import StageNode from "@/nodes/StageNode.vue";
@@ -20,7 +22,31 @@ import StageNode from "@/nodes/StageNode.vue";
 const { t } = useI18n();
 const canvas = useCanvasStore();
 const catalog = useCatalogStore();
-const { fitView, setViewport, viewport, onInit } = useVueFlow();
+const library = useSubjectStore();
+const { fitView, setViewport, viewport, onInit, screenToFlowCoordinate } = useVueFlow();
+
+/**
+ * Drop a node type or a subject onto the canvas.
+ *
+ * The drop position is turned into the canvas's own coordinates, so the node
+ * lands where the pointer was released rather than in the corner.
+ */
+function onDrop(event: DragEvent): void {
+  const payload = event.dataTransfer?.getData("application/prism");
+  if (!payload) return;
+
+  const position = screenToFlowCoordinate({ x: event.clientX, y: event.clientY });
+
+  if (payload.startsWith("node:")) {
+    canvas.addNode(payload.slice("node:".length), position);
+    return;
+  }
+
+  if (payload.startsWith("subject:")) {
+    const subject = library.byId.get(payload.slice("subject:".length));
+    if (subject) canvas.addSubjectNode(subject, position);
+  }
+}
 
 /** The type of value a generator puts on its wire. */
 function generatorOutputType(node: FlowNode | undefined): DataType | null {
@@ -119,7 +145,7 @@ onInit(() => {
 </script>
 
 <template>
-  <div class="board">
+  <div class="board" @dragover.prevent @drop.prevent="onDrop">
     <VueFlow
       v-model:nodes="canvas.flowNodes"
       v-model:edges="canvas.flowEdges"
@@ -140,6 +166,9 @@ onInit(() => {
       </template>
       <template #node-image="props">
         <ImageNode v-bind="props" />
+      </template>
+      <template #node-subject="props">
+        <SubjectNode v-bind="props" />
       </template>
       <template #node-generator="props">
         <GeneratorNode v-bind="props" />

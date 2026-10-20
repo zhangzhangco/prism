@@ -623,6 +623,22 @@ export const useCanvasStore = defineStore("canvas", () => {
     return true;
   }
 
+  /** Drop a subject onto the canvas as a node of its own. */
+  function addSubjectNode(subject: Subject, position: { x: number; y: number }): FlowNode {
+    remember();
+    const id = localId("subject");
+    const node: FlowNode = {
+      id,
+      type: "subject",
+      position,
+      data: { subjectId: subject.id, text: subject.name },
+    };
+    flowNodes.value = [...flowNodes.value, node];
+    selectedNodeId.value = id;
+    scheduleSave();
+    return node;
+  }
+
   /* ---- canvas operations ---- */
 
   function setSnapToGrid(value: boolean): void {
@@ -760,6 +776,7 @@ export const useCanvasStore = defineStore("canvas", () => {
     subjectsOfNode,
     stageNode,
     addSubjectToStage,
+    addSubjectNode,
     document,
     fingerprint,
     open,

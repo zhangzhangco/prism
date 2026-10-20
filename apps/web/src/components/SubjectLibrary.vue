@@ -4,6 +4,8 @@ import { useI18n } from "vue-i18n";
 import type { Subject, SubjectKind, SubjectSpec } from "@prism/contracts";
 import { useSubjectStore } from "@/stores/subjects";
 import { useCanvasStore } from "@/stores/canvas";
+import { api } from "@/api/client";
+import AssetImage from "@/components/AssetImage.vue";
 
 const { t } = useI18n();
 const library = useSubjectStore();
@@ -120,6 +122,40 @@ function addToOutline(subject: Subject): void {
 function remove(subject: Subject): void {
   void library.remove(subject.id);
 }
+
+/** Start a drag that drops this subject onto the canvas. */
+function startDrag(event: DragEvent, subjectId: string): void {
+  event.dataTransfer?.setData("application/prism", `subject:${subjectId}`);
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy";
+}
+
+/* ---- thumbnails ---- */
+
+const thumbnailInputs = new Map<string, HTMLInputElement | null>();
+
+function setThumbnailInput(element: HTMLInputElement | null, subjectId: string): void {
+  thumbnailInputs.set(subjectId, element);
+}
+
+function pickThumbnail(subject: Subject): void {
+  thumbnailInputs.get(subject.id)?.click();
+}
+
+async function uploadThumbnail(subjectId: string, event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file || !canvas.currentId) return;
+
+  try {
+    const asset = await api.uploadAsset(canvas.currentId, file);
+    await library.update(subjectId, { thumbnailAssetId: asset.id });
+    message.value = t("subject.thumbnailSet");
+  } catch (cause) {
+    message.value = cause instanceof Error ? cause.message : t("library.uploadFailed");
+  } finally {
+    input.value = "";
+  }
+}
 </script>
 
 <template>
@@ -217,9 +253,20 @@ function remove(subject: Subject): void {
     <p v-else-if="visible.length === 0" class="node__hint">{{ t("subject.empty") }}</p>
 
     <ul v-else class="subjects">
-      <li v-for="subject in visible" :key="subject.id" class="subjects__item">
+      <li
+        v-for="subject in visible"
+        :key="subject.id"
+        class="subjects__item"
+        draggable="true"
+        @dragstart="startDrag($event, subject.id)"
+      >
         <div class="subjects__head">
-          <strong>{{ subject.name }}</strong>
+          <div class="subjects__identity">
+            <span v-if="library.thumbnailOf(subject)" class="subjects__thumb">
+              <AssetImage :asset="library.thumbnailOf(subject)!" />
+            </span>
+            <strong>{{ subject.name }}</strong>
+          </div>
           <span class="subjects__kind">{{ kindLabel(subject.kind) }}</span>
         </div>
         <p v-if="subject.description" class="subjects__description">{{ subject.description }}</p>
@@ -232,8 +279,18 @@ function remove(subject: Subject): void {
           <button type="button" @click="addToOutline(subject)">
             {{ canvas.inOutline(subject.id) ? t("subject.inOutline") : t("subject.addToOutline") }}
           </button>
+          <button type="button" @click="pickThumbnail(subject)">
+            {{ library.thumbnailOf(subject) ? t("subject.replaceThumbnail") : t("subject.addThumbnail") }}
+          </button>
           <button class="ghost" type="button" @click="remove(subject)">{{ t("common.delete") }}</button>
         </div>
+        <input
+          :ref="(el) => setThumbnailInput(el as HTMLInputElement | null, subject.id)"
+          type="file"
+          accept="image/*"
+          style="display: none"
+          @change="uploadThumbnail(subject.id, $event)"
+        />
       </li>
     </ul>
 

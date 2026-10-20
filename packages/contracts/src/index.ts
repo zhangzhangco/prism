@@ -243,6 +243,7 @@ export type NodeKind =
   | "image"
   | "result"
   | "collection"
+  | "subject"
   | "stage"
   | "generator";
 
@@ -373,9 +374,10 @@ export interface AssetRef {
  * The request conventions of a model.
  *
  * Different image APIs accept different fields. The GPT Image family ignores
- * the legacy `response_format` and returns base64 unconditionally, while
- * the DALL·E family wants `response_format` and only understands its own
- * quality names. The adapter switches on this.
+ * the legacy `response_format` and returns base64 unconditionally, while the
+ * older dialect that wants `response_format` and only understands its own
+ * quality names is still served by some compatible endpoints. The adapter
+ * switches on this.
  */
 export type ModelDialect = "mock" | "gpt-image" | "dall-e" | "generic";
 
@@ -424,6 +426,11 @@ export interface Run {
   modelKey: string;
   status: RunStatus;
   params: Record<string, unknown>;
+  /**
+   * The values the run actually consumed, keyed by input slot. This is the
+   * snapshot taken when the run was accepted.
+   */
+  inputs?: Record<string, unknown>;
   tasks: RunTask[];
   error?: string;
   createdAt: string;

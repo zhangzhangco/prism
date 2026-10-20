@@ -67,9 +67,9 @@ translate them.
   concurrency limit, and polled until they settle. A restart does not lose
   work: interrupted runs are picked up again, and a run that cannot be
   resumed says so instead of hanging.
-- **Pluggable providers.** A small adapter interface with three
-  implementations out of the box: a local backend that needs no credentials,
-  and adapters for the GPT Image and DALL·E dialects of the OpenAI image API.
+- **Pluggable providers.** A small adapter interface with two implementations
+  out of the box: a local backend that needs no credentials, and an adapter
+  for the OpenAI image dialect.
 - **You choose the model.** A generator node lists the models the deployment
   can serve, and the parameters on the node are the ones that model accepts —
   a quality of `high` means something different to a different family, so the
@@ -88,9 +88,15 @@ translate them.
   account, so the same character can be used in as many productions as you
   want. Each production keeps an outline of the subjects it uses, and a
   subject can be dropped into the 3D stage or attached to a generator, where
-  its description joins the prompt and its image becomes a reference. The link
-  survives a save: reopening the canvas restores the outline, the staged object
+  its description joins the prompt and its thumbnail becomes a reference. The
+  link survives a save: reopening the canvas restores the outline, the staged object
   and the generator's subjects.
+- **Drag to build.** A node type or a subject can be dragged from the sidebar
+  onto the canvas, and it lands where it was dropped. Clicking still works, and
+  the result is the same either way.
+- **Thumbnails.** A subject can carry an image that stands for it, which is
+  shown in the library and on the canvas, and is sent as a reference when the
+  subject is used by a generator.
 - **The shortcuts a canvas editor is expected to have.** Undo and redo, copy
   and paste, delete, save, and a command to lay the nodes out again.
 - **Honest output.** The built-in backend marks what it produces: those
@@ -158,8 +164,11 @@ shaped for the model you picked:
 - the **GPT Image** family always returns base64 and rejects the legacy
   `response_format` field, so it is never sent; it takes `background` and
   `output_format` instead;
-- the **DALL·E** family expects `response_format` and knows only its own
-  quality names, and it cannot work from a reference image.
+- the **older dialect** expects `response_format` and knows only its own
+  quality names, and it cannot work from a reference image. OpenAI retired its
+  own DALL·E 3 endpoint in May 2026, so the built-in catalogue does not
+  offer it — compatible servers that still implement that dialect keep
+  working.
 
 ## Layout
 

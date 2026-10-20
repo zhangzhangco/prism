@@ -58,12 +58,46 @@ function isNodeAsset(value: unknown): value is NodeAsset {
   return typeof asset.id === "string" && typeof asset.url === "string";
 }
 
-function valuesFromNode(node: CanvasNode): ProviderInputValue[] {
+/**
+ * What a subject contributes when it is used as a source.
+ *
+ * The server resolves this when a run is accepted, so the snapshot the worker
+ * uses already contains the subject's contribution.
+ */
+export interface SubjectValue {
+  text: string;
+  image?: { assetId: string; url: string; mime: string };
+}
+
+export type SubjectLookup = (subjectId: string) => SubjectValue | null;
+
+function valuesFromNode(
+  node: CanvasNode,
+  lookup?: SubjectLookup,
+): ProviderInputValue[] {
   const data = node.data ?? {};
 
   if (node.kind === "prompt" || node.kind === "text") {
     const text = typeof data.text === "string" ? data.text : "";
     return text.trim() ? [{ kind: "text", text }] : [];
+  }
+
+  if (node.kind === "subject") {
+    const subjectId = typeof data.subjectId === "string" ? data.subjectId : "";
+    if (!subjectId || !lookup) return [];
+    const value = lookup(subjectId);
+    if (!value) return [];
+    const values: ProviderInputValue[] = [];
+    if (value.text.trim()) values.push({ kind: "text", text: value.text });
+    if (value.image) {
+      values.push({
+        kind: "image",
+        assetId: value.image.assetId,
+        url: value.image.url,
+        mime: value.image.mime,
+      });
+    }
+    return values;
   }
 
   if (node.kind === "image" || node.kind === "result") {
@@ -112,6 +146,7 @@ export function resolveInputs(
   document: CanvasDocument,
   nodeId: string,
   plugin: PluginManifest,
+  lookup?: SubjectLookup,
 ): ResolvedInput[] {
   return plugin.inputs.map((slot) => {
     const values: ProviderInputValue[] = [];
@@ -124,7 +159,7 @@ export function resolveInputs(
       const source = findNode(document, edge.source);
       if (!source) continue;
 
-      const produced = valuesFromNode(source);
+      const produced = valuesFromNode(source, lookup);
       if (produced.length === 0) continue;
 
       values.push(...produced);

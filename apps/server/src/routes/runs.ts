@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { ModelDescriptor, PluginManifest, Run, RunRequest } from "@prism/contracts";
 import { documentFingerprint } from "@prism/contracts";
-import { resolveInputs, slotKeyFromHandle } from "../graph.js";
+import { resolveInputs, slotKeyFromHandle, type SubjectLookup } from "../graph.js";
 import { validateParams } from "../models/params.js";
 import { subjectContributions } from "../subjects.js";
 import type { AssetsStore } from "../store/assets.js";
@@ -32,6 +32,7 @@ function toRun(row: ReturnType<RunsStore["get"]>, tasks: Run["tasks"]): Run | nu
     modelKey: row.modelKey,
     status: row.status,
     params: row.params,
+    ...(row.inputs ? { inputs: row.inputs } : {}),
     tasks,
     ...(row.error ? { error: row.error } : {}),
     createdAt: row.createdAt,
@@ -128,7 +129,24 @@ export function registerRunRoutes(app: FastifyInstance, context: RunRouteContext
       // The inputs are resolved now, against the document as it stands, and
       // stored with the run. The worker uses that snapshot, so a change made
       // while the run was queued cannot alter what it consumes.
-      const resolved = resolveInputs(canvas.document, body.nodeId, plugin);
+      const subjectLookup: SubjectLookup = (subjectId) => {
+        const subject = context.subjects.get(userId, subjectId);
+        if (!subject) return null;
+        const contribution = subjectContributions(
+          [subjectId],
+          new Map([[subjectId, subject]]),
+          context.assets,
+          userId,
+          context.publicBaseUrl,
+        )[0];
+        if (!contribution) return null;
+        return {
+          text: contribution.text,
+          ...(contribution.thumbnail ? { image: contribution.thumbnail } : {}),
+        };
+      };
+
+      const resolved = resolveInputs(canvas.document, body.nodeId, plugin, subjectLookup);
       const snapshot: Record<string, unknown> = {};
       for (const input of resolved) {
         snapshot[input.slot.key] = input.values.map((value) => ({

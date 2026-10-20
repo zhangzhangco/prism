@@ -17,10 +17,7 @@ import { createServer } from "node:http";
 
 const GPT_IMAGE_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536", "auto"]);
 const GPT_IMAGE_QUALITIES = new Set(["auto", "low", "medium", "high"]);
-const DALL_E_SIZES = new Set(["1024x1024", "1792x1024", "1024x1792", "512x512"]);
-const DALL_E_QUALITIES = new Set(["standard", "hd"]);
-
-const KNOWN_MODELS = new Set(["gpt-image-1", "dall-e-3"]);
+const KNOWN_MODELS = new Set(["gpt-image-1"]);
 
 function errorResponse(res, status, message, param, code) {
   const body = JSON.stringify({
@@ -159,8 +156,8 @@ export function startFakeOpenAi(options = {}) {
         return;
       }
 
-      const sizes = model === "dall-e-3" ? DALL_E_SIZES : GPT_IMAGE_SIZES;
-      const qualities = model === "dall-e-3" ? DALL_E_QUALITIES : GPT_IMAGE_QUALITIES;
+      const sizes = GPT_IMAGE_SIZES;
+      const qualities = GPT_IMAGE_QUALITIES;
 
       // Multipart fields always arrive as strings, so numbers are coerced
       // the way the real endpoint does.

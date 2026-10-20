@@ -130,7 +130,7 @@ Each model also declares a **dialect**, which is how the request is shaped:
 | --- | --- |
 | `mock` | The built-in backend. |
 | `gpt-image` | Returns base64 unconditionally and rejects the legacy `response_format` field, so it is never sent. Takes `background` and `output_format`. |
-| `dall-e` | Expects `response_format`, knows only its own quality names, and cannot work from a reference image. |
+| `dall-e` | The older dialect, which expects `response_format`, knows only its own quality names, and cannot work from a reference image. OpenAI retired its own DALL·E 3 endpoint in May 2026, so the built-in catalogue does not offer it; compatible servers still implement the dialect and the adapter keeps speaking it. |
 | `generic` | The conservative middle ground. |
 
 A run records the model it was submitted against, so the record says which
@@ -309,6 +309,18 @@ A subject reaches a run in two ways, and both leave a link behind:
 
 The resolution happens when the run is accepted, so the snapshot the worker
 uses already contains the subject's contribution.
+
+A subject can also be placed on the canvas as a node of its own, in which case
+it behaves like any other source: its description is text, and its thumbnail is
+an image. The server resolves it the same way.
+
+### Thumbnails
+
+A subject may carry an image that stands for it. The image is an ordinary
+asset, so the server checks that it belongs to the account that owns the
+subject before accepting it — otherwise a caller could point a subject at
+somebody else's asset, and the subject's thumbnail is served to whoever can
+read the subject.
 
 ## The 3D stage
 

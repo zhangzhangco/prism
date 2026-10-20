@@ -585,5 +585,112 @@ console.log("\nsubjects");
   check("a subject can be removed", removed.status === 204, `got ${removed.status}`);
 }
 
+console.log("\nthumbnails");
+{
+  // A thumbnail is an asset, so it has to belong to the account that owns
+  // the subject.
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAF0lEQVQI12P8//8/AzWBiYGaYFIBqgm5AwCrqAQCsQ7T8AAAAASUVORK5CYII=",
+    "base64",
+  );
+  const form = new FormData();
+  form.append("file", new Blob([png], { type: "image/png" }), "thumb.png");
+  const upload = await fetch(`${baseUrl}/api/canvases/${canvasId}/assets`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const uploaded = await upload.json();
+  const assetId = uploaded?.asset?.id;
+  check("a thumbnail can be uploaded", upload.status === 201 && Boolean(assetId), `got ${upload.status}`);
+
+  const withThumb = await api("/api/subjects", {
+    method: "POST",
+    token,
+    body: {
+      kind: "prop",
+      name: "Crate",
+      description: "a wooden crate",
+      data: { shape: "box", size: 0.8, color: "#8b5a2b" },
+      thumbnailAssetId: assetId,
+    },
+  });
+  check("a subject can take a thumbnail", withThumb.status === 201, `got ${withThumb.status}`);
+  check(
+    "the subject keeps the thumbnail",
+    withThumb.payload?.subject?.thumbnailAssetId === assetId,
+    JSON.stringify(withThumb.payload?.subject?.thumbnailAssetId),
+  );
+
+  // Another account must not be able to point a subject at this asset.
+  const other = await api("/api/auth/register", {
+    method: "POST",
+    body: { email: `other-${Date.now()}@example.test`, password: "other-test-password" },
+  });
+  const otherToken = other.payload?.token;
+  const stolen = await api("/api/subjects", {
+    method: "POST",
+    token: otherToken,
+    body: {
+      kind: "prop",
+      name: "Not mine",
+      data: { shape: "box", size: 1, color: "#000000" },
+      thumbnailAssetId: assetId,
+    },
+  });
+  check(
+    "a thumbnail from another account is refused",
+    stolen.status === 400,
+    `got ${stolen.status} ${JSON.stringify(stolen.payload?.error ?? "")}`,
+  );
+
+  // The thumbnail has to reach a run as a reference image.
+  const thumbCanvas = await api("/api/canvases", {
+    method: "POST",
+    token,
+    body: { name: "Thumbnail canvas" },
+  });
+  const thumbCanvasId = thumbCanvas.payload?.canvas?.id;
+  await api(`/api/canvases/${thumbCanvasId}`, {
+    method: "PATCH",
+    token,
+    body: {
+      document: {
+        version: 1,
+        nodes: [
+          {
+            id: "gen-1",
+            kind: "generator",
+            position: { x: 0, y: 0 },
+            data: { pluginId: "image-to-image", params: { size: "512x512" }, subjects: [] },
+          },
+        ],
+        edges: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+      },
+    },
+  });
+  const thumbRun = await api(`/api/canvases/${thumbCanvasId}/runs`, {
+    method: "POST",
+    token,
+    body: { nodeId: "gen-1", pluginId: "image-to-image", params: { size: "512x512" } },
+  });
+  check("a run that needs a reference is accepted", thumbRun.status === 202, `got ${thumbRun.status}`);
+  const thumbFinal = await waitForRun(token, thumbRun.payload?.run?.id);
+  check(
+    "a run that needs a reference reports the missing input",
+    thumbFinal?.status === "failed" && /Reference|input/i.test(thumbFinal?.error ?? ""),
+    `${thumbFinal?.status} ${thumbFinal?.error ?? ""}`,
+  );
+}
+
+console.log("\nmodel catalogue");
+{
+  const listed = await api("/api/models", { token });
+  const keys = (listed.payload?.models ?? []).map((model) => model.key);
+  check("the retired model is no longer offered", !keys.includes("dall-e-3"), keys.join(", "));
+  check("the current image model is offered", keys.includes("gpt-image-1"), keys.join(", "));
+}
+
 console.log(failures === 0 ? "\nAll checks passed." : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

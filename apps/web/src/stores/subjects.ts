@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import type { Subject, SubjectKind, SubjectSpec } from "@prism/contracts";
+import type { AssetRef, Subject, SubjectKind, SubjectSpec } from "@prism/contracts";
 import { api } from "@/api/client";
 
 /**
@@ -30,6 +30,24 @@ export const useSubjectStore = defineStore("subjects", () => {
     }
     return result;
   });
+
+  /**
+   * The image that stands for a subject.
+   *
+   * The bytes live behind the API's token, so the image is fetched with the
+   * token rather than linked directly.
+   */
+  function thumbnailOf(subject: Subject): AssetRef | null {
+    if (!subject.thumbnailAssetId) return null;
+    return {
+      id: subject.thumbnailAssetId,
+      url: `/api/assets/${subject.thumbnailAssetId}`,
+      mime: "image/*",
+      filename: subject.name,
+      bytes: 0,
+      createdAt: subject.updatedAt,
+    };
+  }
 
   async function load(): Promise<void> {
     loading.value = true;
@@ -106,6 +124,7 @@ export const useSubjectStore = defineStore("subjects", () => {
     error,
     byId,
     counts,
+    thumbnailOf,
     load,
     create,
     update,

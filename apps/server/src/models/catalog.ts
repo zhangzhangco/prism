@@ -104,33 +104,6 @@ const GPT_IMAGE_OUTPUT_FORMAT: ParamSpec = {
   ],
 };
 
-/* ---------- the DALL·E family ---------- */
-
-const DALL_E_SIZE: ParamSpec = {
-  key: "size",
-  label: "Size",
-  labelKey: "common.size",
-  type: "enum",
-  default: "1024x1024",
-  options: [
-    { value: "1024x1024", label: "1024 × 1024" },
-    { value: "1792x1024", label: "1792 × 1024" },
-    { value: "1024x1792", label: "1024 × 1792" },
-  ],
-};
-
-const DALL_E_QUALITY: ParamSpec = {
-  key: "quality",
-  label: "Quality",
-  labelKey: "common.quality",
-  type: "enum",
-  default: "standard",
-  options: [
-    { value: "standard", label: "Standard", labelKey: "option.standard" },
-    { value: "hd", label: "HD", labelKey: "option.hd" },
-  ],
-};
-
 export interface BuiltinModel extends ModelDescriptor {
   mediaType: DataType;
 }
@@ -175,17 +148,6 @@ export function builtinModels(options: { hasRemoteProvider: boolean }): BuiltinM
       ],
       enabled: options.hasRemoteProvider,
       supportsReference: true,
-    },
-    {
-      key: "dall-e-3",
-      provider: "openai-compatible",
-      label: "DALL·E 3",
-      labelKey: "model.dallE3.label",
-      mediaType: "image",
-      dialect: "dall-e",
-      params: [DALL_E_SIZE, DALL_E_QUALITY, { ...COUNT, default: 1, max: 1 }],
-      enabled: options.hasRemoteProvider,
-      supportsReference: false,
     },
   ];
 }

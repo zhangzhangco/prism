@@ -20,6 +20,18 @@ export function registerSubjectRoutes(
 ): void {
   const auth = authenticate(context.users);
 
+  /**
+   * A thumbnail has to be an asset of the account that owns the subject.
+   * Without this check a caller could point a subject at somebody else's
+   * asset — and the subject's thumbnail is served to whoever can read it.
+   */
+  function checkThumbnail(userId: string, assetId: string | null | undefined): string | null {
+    if (!assetId) return null;
+    const asset = context.assets.get(userId, assetId);
+    if (!asset) return "The thumbnail is not an asset of this account";
+    return null;
+  }
+
   app.get<{ Querystring: { kind?: string; q?: string } }>(
     "/api/subjects",
     { preHandler: auth },
@@ -71,6 +83,15 @@ export function registerSubjectRoutes(
           error: { code: "invalid_request", message: `Unknown kind "${body.kind}"` },
         });
       }
+      const thumbnailProblem = checkThumbnail(
+        currentUserId(request),
+        body.thumbnailAssetId,
+      );
+      if (thumbnailProblem) {
+        return reply.code(400).send({
+          error: { code: "invalid_thumbnail", message: thumbnailProblem },
+        });
+      }
       const subject = context.subjects.create({
         userId,
         kind: body.kind,
@@ -83,7 +104,6 @@ export function registerSubjectRoutes(
       return reply.code(201).send({ subject });
     },
   );
-
   app.patch<{
     Params: { id: string };
     Body: {
@@ -98,11 +118,17 @@ export function registerSubjectRoutes(
     "/api/subjects/:id",
     { preHandler: auth },
     async (request, reply) => {
-      const subject = context.subjects.update(
-        currentUserId(request),
-        request.params.id,
-        request.body ?? {},
-      );
+      const userId = currentUserId(request);
+      const body = request.body ?? {};
+      if (body.thumbnailAssetId !== undefined) {
+        const thumbnailProblem = checkThumbnail(userId, body.thumbnailAssetId);
+        if (thumbnailProblem) {
+          return reply.code(400).send({
+            error: { code: "invalid_thumbnail", message: thumbnailProblem },
+          });
+        }
+      }
+      const subject = context.subjects.update(userId, request.params.id, body);
       if (!subject) {
         return reply
           .code(404)
