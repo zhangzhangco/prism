@@ -24,6 +24,8 @@ jobs:
 
       - run: pnpm typecheck
 
+      - run: pnpm test
+
       - run: pnpm build
 
   smoke:
@@ -56,3 +58,25 @@ jobs:
 
       - name: Run the smoke test
         run: node scripts/smoke.mjs
+
+  recovery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the server
+        run: pnpm --filter @prism/contracts build && pnpm --filter @prism/server build
+
+      - name: Check that an interrupted run recovers
+        run: node scripts/recovery.mjs

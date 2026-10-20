@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type { Run, RunRequest } from "@prism/contracts";
+import { documentFingerprint } from "@prism/contracts";
 import type { GraphResolutionError } from "../graph.js";
+import type { CanvasesStore } from "../store/canvases.js";
 import type { RunsStore } from "../store/runs.js";
 import type { UsersStore } from "../store/users.js";
 import { authenticate, currentUserId } from "./auth.js";
@@ -8,6 +10,7 @@ import { authenticate, currentUserId } from "./auth.js";
 export interface RunRouteContext {
   runs: RunsStore;
   users: UsersStore;
+  canvases: CanvasesStore;
   pluginById: (id: string) => { id: string; name: string } | undefined;
 }
 
@@ -45,6 +48,29 @@ export function registerRunRoutes(app: FastifyInstance, context: RunRouteContext
         return reply.code(404).send({
           error: { code: "not_found", message: `No such plugin "${body.pluginId}"` },
         });
+      }
+
+      // The graph the server runs against is the stored one. If the client is
+      // looking at a newer revision than the one on disk, the run would use
+      // stale inputs, so it is refused instead.
+      const canvas = context.canvases.get(userId, request.params.id);
+      if (!canvas) {
+        return reply
+          .code(404)
+          .send({ error: { code: "not_found", message: "No such canvas" } });
+      }
+      if (body.documentFingerprint) {
+        const stored = documentFingerprint(canvas.document);
+        if (stored !== body.documentFingerprint) {
+          return reply.code(409).send({
+            error: {
+              code: "stale_document",
+              message:
+                "The canvas changed since it was last saved. Save it and try again.",
+              details: { expected: stored, received: body.documentFingerprint },
+            },
+          });
+        }
       }
 
       const run = context.runs.create({

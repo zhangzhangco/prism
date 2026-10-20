@@ -60,6 +60,7 @@ export async function buildServer(config: ServerConfig): Promise<PrismServer> {
   registerRunRoutes(app, {
     runs,
     users,
+    canvases,
     pluginById: (id) => plugins.find((plugin) => plugin.id === id),
   });
 

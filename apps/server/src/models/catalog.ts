@@ -51,7 +51,7 @@ export function builtinModels(options: { hasRemoteProvider: boolean }): BuiltinM
     {
       key: "prism-diffusion-v1",
       provider: "mock",
-      label: "Prism Diffusion v1",
+      label: "Prism Diffusion v1 (demo)",
       mediaType: "image",
       params: [SIZE_PARAM, QUALITY_PARAM, COUNT_PARAM],
       enabled: true,
@@ -59,7 +59,7 @@ export function builtinModels(options: { hasRemoteProvider: boolean }): BuiltinM
     {
       key: "prism-diffusion-xl",
       provider: "mock",
-      label: "Prism Diffusion XL",
+      label: "Prism Diffusion XL (demo)",
       mediaType: "image",
       params: [SIZE_PARAM, { ...QUALITY_PARAM, default: "high" }, COUNT_PARAM],
       enabled: true,

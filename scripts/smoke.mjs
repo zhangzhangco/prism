@@ -3,10 +3,12 @@
  * End-to-end smoke test.
  *
  * Exercises the whole product path against a running server: sign up, create
- * a canvas, wire a prompt into a generator, run it, and fetch the produced
- * asset. Run it with `pnpm smoke` while the server is listening.
+ * a canvas, wire a prompt into a generator, run it, chain the result into
+ * another generator, and check the guards that keep a run honest.
+ *
+ * Run it with `pnpm smoke` while the server is listening.
  */
-import { readFileSync } from "node:fs";
+import { documentFingerprint } from "../packages/contracts/dist/index.js";
 
 const baseUrl = process.env.PRISM_BASE_URL ?? "http://127.0.0.1:4319";
 const email = `smoke-${Date.now()}@example.test`;
@@ -43,6 +45,16 @@ async function api(path, { method = "GET", token, body, raw } = {}) {
   return { status: response.status, payload };
 }
 
+async function waitForRun(token, runId, attempts = 60) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const status = await api(`/api/runs/${runId}`, { token });
+    const run = status.payload?.run;
+    if (run && ["succeeded", "failed", "canceled"].includes(run.status)) return run;
+  }
+  return null;
+}
+
 console.log(`Smoke test against ${baseUrl}\n`);
 
 console.log("auth");
@@ -68,6 +80,8 @@ const plugins = await api("/api/plugins", { token });
 check("plugin catalog is not empty", (plugins.payload?.plugins ?? []).length > 0);
 const models = await api("/api/models", { token });
 check("model catalog is not empty", (models.payload?.models ?? []).length > 0);
+const upscale = (plugins.payload?.plugins ?? []).find((plugin) => plugin.id === "upscale");
+check("upscale is a local runtime", upscale?.runtime?.kind === "local", JSON.stringify(upscale?.runtime));
 
 console.log("\ncanvas");
 const created = await api("/api/canvases", {
@@ -115,6 +129,43 @@ const saved = await api(`/api/canvases/${canvasId}`, {
 check("document is saved", saved.status === 200, `got ${saved.status}`);
 check("saved document keeps the nodes", (saved.payload?.canvas?.document?.nodes ?? []).length === 2);
 
+const viewportSaved = saved.payload?.canvas?.document?.viewport;
+check(
+  "the viewport is saved with the document",
+  viewportSaved && typeof viewportSaved.zoom === "number",
+  JSON.stringify(viewportSaved),
+);
+
+console.log("\nstale document guard");
+const stale = await api(`/api/canvases/${canvasId}/runs`, {
+  method: "POST",
+  token,
+  body: {
+    nodeId: "gen-1",
+    pluginId: "text-to-image",
+    params: { ratio: "1:1" },
+    documentFingerprint: "not-the-current-fingerprint",
+  },
+});
+check("a run against a changed graph is refused", stale.status === 409, `got ${stale.status}`);
+check(
+  "the refusal names the reason",
+  stale.payload?.error?.code === "stale_document",
+  JSON.stringify(stale.payload?.error),
+);
+
+const fresh = await api(`/api/canvases/${canvasId}/runs`, {
+  method: "POST",
+  token,
+  body: {
+    nodeId: "gen-1",
+    pluginId: "text-to-image",
+    params: { ratio: "1:1" },
+    documentFingerprint: documentFingerprint(document),
+  },
+});
+check("a run against the current graph is accepted", fresh.status === 202, `got ${fresh.status}`);
+
 console.log("\ngeneration");
 const run = await api(`/api/canvases/${canvasId}/runs`, {
   method: "POST",
@@ -124,16 +175,15 @@ const run = await api(`/api/canvases/${canvasId}/runs`, {
 check("run is accepted", run.status === 202, `got ${run.status}`);
 const runId = run.payload?.run?.id;
 
-let final = null;
-for (let attempt = 0; attempt < 40; attempt += 1) {
-  await new Promise((resolve) => setTimeout(resolve, 400));
-  const status = await api(`/api/runs/${runId}`, { token });
-  final = status.payload?.run;
-  if (final && ["succeeded", "failed", "canceled"].includes(final.status)) break;
-}
+const final = await waitForRun(token, runId);
 check("run finishes", final?.status === "succeeded", `status ${final?.status} ${final?.error ?? ""}`);
 const asset = final?.tasks?.[0]?.assets?.[0];
 check("run produced an asset", Boolean(asset?.url), JSON.stringify(final?.tasks));
+check(
+  "the result is marked as coming from the demo backend",
+  final?.tasks?.[0]?.synthetic === true,
+  JSON.stringify(final?.tasks?.[0]),
+);
 
 if (asset?.url) {
   const download = await fetch(asset.url, { headers: { authorization: `Bearer ${token}` } });
@@ -142,6 +192,142 @@ if (asset?.url) {
   check("asset is a PNG", bytes.subarray(0, 8).toString("hex") === "89504e470d0a1a0a");
   check("asset is not empty", bytes.length > 1000, `${bytes.length} bytes`);
 }
+
+console.log("\nchaining a result into the next generator");
+const chainedCanvas = await api("/api/canvases", {
+  method: "POST",
+  token,
+  body: { name: "Chained canvas" },
+});
+const chainedId = chainedCanvas.payload?.canvas?.id;
+
+// A result node holding the asset the first run produced, wired into a
+// second generator. This is the "generate, then use the result" path.
+await api(`/api/canvases/${chainedId}`, {
+  method: "PATCH",
+  token,
+  body: {
+    document: {
+      version: 1,
+      nodes: [
+        {
+          id: "result-1",
+          kind: "result",
+          position: { x: 0, y: 0 },
+          data: { assets: [asset], selectedAssetId: asset.id },
+        },
+        {
+          id: "gen-2",
+          kind: "generator",
+          position: { x: 320, y: 0 },
+          data: { pluginId: "image-to-image", params: { ratio: "1:1" } },
+        },
+      ],
+      edges: [
+        {
+          id: "edge-1",
+          source: "result-1",
+          sourceHandle: "out",
+          target: "gen-2",
+          targetHandle: "slot:image",
+        },
+      ],
+      viewport: { x: 0, y: 0, zoom: 1 },
+    },
+  },
+});
+
+const chainedRun = await api(`/api/canvases/${chainedId}/runs`, {
+  method: "POST",
+  token,
+  body: { nodeId: "gen-2", pluginId: "image-to-image", params: { ratio: "1:1" } },
+});
+check("the chained run is accepted", chainedRun.status === 202, `got ${chainedRun.status}`);
+const chainedFinal = await waitForRun(token, chainedRun.payload?.run?.id);
+check(
+  "the chained run finishes",
+  chainedFinal?.status === "succeeded",
+  `status ${chainedFinal?.status} ${chainedFinal?.error ?? ""}`,
+);
+const chainedAsset = chainedFinal?.tasks?.[0]?.assets?.[0];
+check("the chained run produced an asset", Boolean(chainedAsset?.url));
+
+console.log("\nthe reference image changes the output");
+if (chainedAsset && asset) {
+  const first = await fetch(asset.url, { headers: { authorization: `Bearer ${token}` } });
+  const second = await fetch(chainedAsset.url, { headers: { authorization: `Bearer ${token}` } });
+  const firstBytes = Buffer.from(await first.arrayBuffer());
+  const secondBytes = Buffer.from(await second.arrayBuffer());
+  check(
+    "a run with a reference differs from one without",
+    !firstBytes.equals(secondBytes),
+    "the reference image did not reach the backend",
+  );
+}
+
+console.log("\nupscaling");
+const upscaleCanvas = await api("/api/canvases", {
+  method: "POST",
+  token,
+  body: { name: "Upscale canvas" },
+});
+const upscaleId = upscaleCanvas.payload?.canvas?.id;
+await api(`/api/canvases/${upscaleId}`, {
+  method: "PATCH",
+  token,
+  body: {
+    document: {
+      version: 1,
+      nodes: [
+        {
+          id: "image-1",
+          kind: "image",
+          position: { x: 0, y: 0 },
+          data: { assets: [asset] },
+        },
+        {
+          id: "gen-3",
+          kind: "generator",
+          position: { x: 320, y: 0 },
+          data: { pluginId: "upscale", params: { factor: "2x" } },
+        },
+      ],
+      edges: [
+        {
+          id: "edge-1",
+          source: "image-1",
+          sourceHandle: "out",
+          target: "gen-3",
+          targetHandle: "slot:image",
+        },
+      ],
+      viewport: { x: 0, y: 0, zoom: 1 },
+    },
+  },
+});
+const upscaleRun = await api(`/api/canvases/${upscaleId}/runs`, {
+  method: "POST",
+  token,
+  body: { nodeId: "gen-3", pluginId: "upscale", params: { factor: "2x" } },
+});
+const upscaleFinal = await waitForRun(token, upscaleRun.payload?.run?.id);
+check(
+  "the upscale run finishes",
+  upscaleFinal?.status === "succeeded",
+  `status ${upscaleFinal?.status} ${upscaleFinal?.error ?? ""}`,
+);
+const upscaled = upscaleFinal?.tasks?.[0]?.assets?.[0];
+check("the upscale produced an asset", Boolean(upscaled?.url));
+check(
+  "the upscaled image is twice the size",
+  upscaled?.width === asset?.width * 2 && upscaled?.height === asset?.height * 2,
+  `${upscaled?.width}x${upscaled?.height} from ${asset?.width}x${asset?.height}`,
+);
+check(
+  "an upscale is not a demo result",
+  upscaleFinal?.tasks?.[0]?.synthetic !== true,
+  JSON.stringify(upscaleFinal?.tasks?.[0]),
+);
 
 console.log("\nvalidation");
 const missingPlugin = await api(`/api/canvases/${canvasId}/runs`, {
@@ -195,13 +381,7 @@ const graphRun = await api(`/api/canvases/${graphId}/runs`, {
   token,
   body: { nodeId: "sculpt-1", pluginId: "prompt-sculptor", params: { tone: "concise" } },
 });
-let graphFinal = null;
-for (let attempt = 0; attempt < 40; attempt += 1) {
-  await new Promise((resolve) => setTimeout(resolve, 400));
-  const status = await api(`/api/runs/${graphRun.payload?.run?.id}`, { token });
-  graphFinal = status.payload?.run;
-  if (graphFinal && ["succeeded", "failed", "canceled"].includes(graphFinal.status)) break;
-}
+const graphFinal = await waitForRun(token, graphRun.payload?.run?.id);
 check("local plugin run finishes", graphFinal?.status === "succeeded", `status ${graphFinal?.status} ${graphFinal?.error ?? ""}`);
 const producedText = graphFinal?.tasks?.[0]?.text ?? "";
 check(

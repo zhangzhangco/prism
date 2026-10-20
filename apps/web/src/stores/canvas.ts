@@ -1,11 +1,12 @@
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 import type { Connection } from "@vue-flow/core";
-import type { AssetRef, CanvasDocument, Run } from "@prism/contracts";
-import { api } from "@/api/client";
+import type { AssetRef, CanvasDocument, Run, Viewport } from "@prism/contracts";
+import { documentFingerprint } from "@prism/contracts";
+import { api, ApiError } from "@/api/client";
 import { documentToEdges, documentToNodes, nodesToDocument } from "@/graph/convert";
 import { SOURCE_HANDLE, slotHandle, type FlowEdge, type FlowNode, type GeneratorNodeData } from "@/graph/types";
-import { useCatalogStore } from "./index";
+import { defaultStage } from "@/stage/defaults";
 
 let idCounter = 0;
 function localId(prefix: string): string {
@@ -14,7 +15,7 @@ function localId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${idCounter}-${random}`;
 }
 
-const SAVE_DEBOUNCE_MS = 700;
+const SAVE_DEBOUNCE_MS = 600;
 
 export const useCanvasStore = defineStore("canvas", () => {
   const flowNodes = shallowRef<FlowNode[]>([]);
@@ -23,16 +24,22 @@ export const useCanvasStore = defineStore("canvas", () => {
   const currentName = ref("");
   const runs = ref<Record<string, Run>>({});
   const saving = ref(false);
+  const dirty = ref(false);
   const lastSavedAt = ref<string | null>(null);
   const error = ref<string | null>(null);
   const selectedNodeId = ref<string | null>(null);
+  const consoleNodeId = ref<string | null>(null);
+  const viewport = ref<Viewport>({ x: 0, y: 0, zoom: 1 });
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let inFlight: Promise<void> | null = null;
   const pollers = new Map<string, ReturnType<typeof setInterval>>();
 
-  const document = computed<CanvasDocument>(() =>
-    nodesToDocument(flowNodes.value, flowEdges.value),
-  );
+  const document = computed<CanvasDocument>(() => ({
+    ...nodesToDocument(flowNodes.value, flowEdges.value),
+    viewport: viewport.value,
+  }));
+  const fingerprint = computed(() => documentFingerprint(document.value));
   const selectedNode = computed(() =>
     flowNodes.value.find((node) => node.id === selectedNodeId.value) ?? null,
   );
@@ -40,9 +47,31 @@ export const useCanvasStore = defineStore("canvas", () => {
   function applyDocument(next: CanvasDocument): void {
     flowNodes.value = documentToNodes(next);
     flowEdges.value = documentToEdges(next);
+    viewport.value = next.viewport ?? { x: 0, y: 0, zoom: 1 };
+    dirty.value = false;
+  }
+
+  /**
+   * Write the current state out and wait for it.
+   *
+   * Everything that can end a session — starting a run, switching canvas,
+   * closing the tab — goes through this first, so the server never acts on a
+   * graph that is older than what the user is looking at.
+   */
+  async function flushSave(): Promise<void> {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    if (inFlight) {
+      await inFlight;
+    }
+    if (!dirty.value || !currentId.value) return;
+    await saveNow();
   }
 
   async function open(canvasId: string): Promise<void> {
+    await flushSave();
     const response = await api.getCanvas(canvasId);
     currentId.value = response.canvas.id;
     currentName.value = response.canvas.name;
@@ -52,6 +81,7 @@ export const useCanvasStore = defineStore("canvas", () => {
   }
 
   async function create(name: string): Promise<string> {
+    await flushSave();
     const response = await api.createCanvas(name);
     currentId.value = response.canvas.id;
     currentName.value = name;
@@ -61,34 +91,67 @@ export const useCanvasStore = defineStore("canvas", () => {
   }
 
   function scheduleSave(): void {
+    dirty.value = true;
     if (!currentId.value) return;
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
+      saveTimer = null;
       void saveNow();
     }, SAVE_DEBOUNCE_MS);
   }
 
   async function saveNow(): Promise<void> {
     if (!currentId.value) return;
+    const canvasId = currentId.value;
+    const snapshot = document.value;
     saving.value = true;
-    try {
-      await api.saveCanvas(currentId.value, document.value, currentName.value);
-      lastSavedAt.value = new Date().toISOString();
-      error.value = null;
-    } catch (cause) {
-      error.value = cause instanceof Error ? cause.message : "Could not save the canvas";
-    } finally {
-      saving.value = false;
-    }
+    const task = (async () => {
+      try {
+        await api.saveCanvas(canvasId, snapshot, currentName.value);
+        lastSavedAt.value = new Date().toISOString();
+        error.value = null;
+        // Only clear the flag if nothing changed while the write was in flight.
+        if (fingerprint.value === documentFingerprint(snapshot)) {
+          dirty.value = false;
+        }
+      } catch (cause) {
+        error.value = cause instanceof Error ? cause.message : "Could not save the canvas";
+      } finally {
+        saving.value = false;
+      }
+    })();
+    inFlight = task;
+    await task;
+    if (inFlight === task) inFlight = null;
+  }
+
+  function setViewport(next: Viewport): void {
+    viewport.value = next;
+    scheduleSave();
+  }
+
+  /**
+   * Save while the tab is going away.
+   *
+   * A normal request would be cancelled by the navigation, so this one is
+   * sent with `keepalive`, which the browser lets finish.
+   */
+  function flushSaveOnUnload(): void {
+    if (!dirty.value || !currentId.value) return;
+    dirty.value = false;
+    api.saveCanvasKeepalive(currentId.value, document.value, currentName.value);
   }
 
   function addNode(kind: string, position: { x: number; y: number }): FlowNode {
     const id = localId(kind);
     const data: Record<string, unknown> = { text: "" };
-    if (kind === "image") data.assets = [];
+    if (kind === "image" || kind === "result") data.assets = [];
     if (kind === "generator") {
       data.pluginId = "text-to-image";
       data.params = { ratio: "1:1" };
+    }
+    if (kind === "stage") {
+      data.stage = defaultStage();
     }
 
     const node: FlowNode = { id, type: kind, position, data };
@@ -147,7 +210,7 @@ export const useCanvasStore = defineStore("canvas", () => {
   function setParam(nodeId: string, key: string, value: unknown): void {
     const node = flowNodes.value.find((item) => item.id === nodeId);
     if (!node) return;
-    const data = node.data as unknown as unknown as GeneratorNodeData;
+    const data = node.data as unknown as GeneratorNodeData;
     node.data = { ...(node.data ?? {}), params: { ...(data.params ?? {}), [key]: value } };
     flowNodes.value = [...flowNodes.value];
     scheduleSave();
@@ -158,7 +221,8 @@ export const useCanvasStore = defineStore("canvas", () => {
    *
    * The server owns the graph: it reads the stored document to work out what
    * the generator consumed, so the client only has to name the node and the
-   * parameters.
+   * parameters. The document is flushed first, and the request carries a
+   * fingerprint so the server can refuse to run against a stale graph.
    */
   async function run(nodeId: string): Promise<void> {
     if (!currentId.value) return;
@@ -169,11 +233,8 @@ export const useCanvasStore = defineStore("canvas", () => {
     updateNodeData(nodeId, { status: "queued", error: undefined });
 
     try {
-      const response = await api.startRun(currentId.value, {
-        nodeId,
-        pluginId: data.pluginId,
-        params: data.params ?? {},
-      });
+      await flushSave();
+      const response = await startRun(nodeId, data);
       runs.value = { ...runs.value, [response.run.id]: response.run };
       updateNodeData(nodeId, { runId: response.run.id, status: response.run.status });
       follow(response.run.id, nodeId);
@@ -182,6 +243,32 @@ export const useCanvasStore = defineStore("canvas", () => {
         status: "failed",
         error: cause instanceof Error ? cause.message : "The run could not be started",
       });
+    }
+  }
+
+  async function startRun(nodeId: string, data: GeneratorNodeData) {
+    const canvasId = currentId.value!;
+    try {
+      return await api.startRun(canvasId, {
+        nodeId,
+        pluginId: data.pluginId,
+        params: data.params ?? {},
+        documentFingerprint: fingerprint.value,
+      });
+    } catch (cause) {
+      // The graph on the server was older than the one on screen. Save and
+      // try once more before giving up.
+      if (cause instanceof ApiError && cause.code === "stale_document") {
+        dirty.value = true;
+        await saveNow();
+        return api.startRun(canvasId, {
+          nodeId,
+          pluginId: data.pluginId,
+          params: data.params ?? {},
+          documentFingerprint: fingerprint.value,
+        });
+      }
+      throw cause;
     }
   }
 
@@ -199,8 +286,11 @@ export const useCanvasStore = defineStore("canvas", () => {
             pollers.delete(runId);
             if (response.run.status === "succeeded") {
               const assets = response.run.tasks.flatMap((task) => task.assets ?? []);
+              const text = response.run.tasks.map((task) => task.text ?? "").join("\n").trim();
               if (assets.length > 0) {
                 addResultNode(nodeId, response.run, assets);
+              } else if (text) {
+                addTextNode(nodeId, response.run, text);
               }
             }
           }
@@ -218,6 +308,7 @@ export const useCanvasStore = defineStore("canvas", () => {
     if (!producer) return;
 
     const id = localId("result");
+    const synthetic = run.tasks.some((task) => task.synthetic);
     const node: FlowNode = {
       id,
       type: "result",
@@ -225,9 +316,40 @@ export const useCanvasStore = defineStore("canvas", () => {
       data: {
         assets,
         runId: run.id,
-        label: "Result",
+        label: synthetic ? "Demo result" : "Result",
         producerNodeId: producerId,
+        synthetic,
+        // The first output is the one carried onto the wire until the user
+        // picks another one.
+        selectedAssetId: assets[0]?.id,
       },
+    };
+    flowNodes.value = [...flowNodes.value, node];
+    flowEdges.value = [
+      ...flowEdges.value,
+      {
+        id: localId("edge"),
+        source: producerId,
+        sourceHandle: SOURCE_HANDLE,
+        target: id,
+        targetHandle: slotHandle("output"),
+        type: "smoothstep",
+      },
+    ];
+    scheduleSave();
+  }
+
+  /** A run that produced text leaves a node the user can wire onwards. */
+  function addTextNode(producerId: string, run: Run, text: string): void {
+    const producer = flowNodes.value.find((node) => node.id === producerId);
+    if (!producer) return;
+
+    const id = localId("text");
+    const node: FlowNode = {
+      id,
+      type: "text",
+      position: { x: producer.position.x + 300, y: producer.position.y },
+      data: { text, runId: run.id, label: "Text result" },
     };
     flowNodes.value = [...flowNodes.value, node];
     flowEdges.value = [
@@ -253,6 +375,7 @@ export const useCanvasStore = defineStore("canvas", () => {
     currentName.value = "";
     runs.value = {};
     selectedNodeId.value = null;
+    viewport.value = { x: 0, y: 0, zoom: 1 };
   }
 
   return {
@@ -262,15 +385,22 @@ export const useCanvasStore = defineStore("canvas", () => {
     currentName,
     runs,
     saving,
+    dirty,
     lastSavedAt,
     error,
     selectedNodeId,
+    consoleNodeId,
     selectedNode,
+    viewport,
     document,
+    fingerprint,
     open,
     create,
     scheduleSave,
     saveNow,
+    flushSave,
+    flushSaveOnUnload,
+    setViewport,
     addNode,
     connect,
     removeNode,

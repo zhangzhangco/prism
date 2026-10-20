@@ -79,6 +79,11 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_run_tasks_run ON run_tasks(run_id);
   `,
+  `
+  ALTER TABLE run_tasks ADD COLUMN synthetic INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE runs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE runs ADD COLUMN recovered_at TEXT;
+  `,
 ];
 
 export function openDatabase(config: ServerConfig): Db {

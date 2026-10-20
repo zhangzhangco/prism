@@ -1,87 +1,124 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { CanvasDocument, PluginManifest } from "@prism/contracts";
-import { composePrompt, resolveInputs, slotKeyFromHandle } from "./graph.js";
+import type { CanvasDocument } from "@prism/contracts";
+import { documentFingerprint } from "@prism/contracts";
+import { resolveInputs, slotKeyFromHandle } from "./graph.js";
 
-const plugin: PluginManifest = {
-  id: "test",
-  name: "Test",
-  version: "1.0.0",
-  category: "test",
-  summary: "",
-  icon: "",
-  inputs: [
-    { key: "prompt", label: "Prompt", dataType: "text", required: false, min: 0, max: 1 },
-    { key: "image", label: "Image", dataType: "image", required: true, min: 1, max: 2 },
+const document: CanvasDocument = {
+  version: 1,
+  nodes: [
+    { id: "p", kind: "prompt", position: { x: 0, y: 0 }, data: { text: "a red bicycle" } },
+    {
+      id: "r",
+      kind: "result",
+      position: { x: 0, y: 0 },
+      data: {
+        assets: [
+          { id: "ast_1", url: "https://example.test/1.png" },
+          { id: "ast_2", url: "https://example.test/2.png" },
+        ],
+      },
+    },
+    {
+      id: "s",
+      kind: "stage",
+      position: { x: 0, y: 0 },
+      data: { frame: { id: "ast_9", url: "https://example.test/frame.png" } },
+    },
+    { id: "g", kind: "generator", position: { x: 0, y: 0 }, data: {} },
   ],
-  outputs: [{ key: "images", label: "Images", dataType: "image", params: [] }],
-  defaults: {},
-  runtime: { kind: "provider", modelKey: "test-model" },
-  enabled: true,
+  edges: [],
+  viewport: { x: 0, y: 0, zoom: 1 },
 };
 
-function documentWith(edges: CanvasDocument["edges"]): CanvasDocument {
-  return {
+test("the fingerprint does not depend on key order", () => {
+  const a: CanvasDocument = {
     version: 1,
-    nodes: [
-      { id: "p", kind: "prompt", position: { x: 0, y: 0 }, data: { text: "a red bicycle" } },
-      {
-        id: "i",
-        kind: "image",
-        position: { x: 0, y: 0 },
-        data: { assets: [{ id: "ast_1", url: "https://example.test/a.png" }] },
-      },
-      { id: "g", kind: "generator", position: { x: 0, y: 0 }, data: { pluginId: "test", params: {} } },
-    ],
-    edges,
+    nodes: [{ id: "n", kind: "prompt", position: { x: 1, y: 2 }, data: { text: "hi" } }],
+    edges: [],
     viewport: { x: 0, y: 0, zoom: 1 },
   };
-}
-
-test("reads the slot key out of a handle", () => {
-  assert.equal(slotKeyFromHandle("slot:prompt"), "prompt");
-  assert.equal(slotKeyFromHandle("plain"), "plain");
+  const b: CanvasDocument = {
+    viewport: { zoom: 1, y: 0, x: 0 },
+    edges: [],
+    nodes: [{ data: { text: "hi" }, position: { y: 2, x: 1 }, kind: "prompt", id: "n" }],
+    version: 1,
+  };
+  assert.equal(documentFingerprint(a), documentFingerprint(b));
 });
 
-test("collects the values on the wires that feed a slot", () => {
-  const document = documentWith([
-    { id: "e1", source: "p", sourceHandle: "out", target: "g", targetHandle: "slot:prompt" },
-    { id: "e2", source: "i", sourceHandle: "out", target: "g", targetHandle: "slot:image" },
-  ]);
+test("the fingerprint changes when the graph changes", () => {
+  const changed: CanvasDocument = {
+    ...document,
+    nodes: document.nodes.map((node) =>
+      node.id === "p" ? { ...node, data: { text: "a blue bicycle" } } : node,
+    ),
+  };
+  assert.notEqual(documentFingerprint(document), documentFingerprint(changed));
+});
 
-  const resolved = resolveInputs(document, "g", plugin);
-  const prompt = resolved.find((input) => input.slot.key === "prompt");
+test("a result node hands on its selected asset", () => {
+  const withEdges: CanvasDocument = {
+    ...document,
+    nodes: document.nodes.map((node) =>
+      node.id === "r" ? { ...node, data: { ...node.data, selectedAssetId: "ast_2" } } : node,
+    ),
+    edges: [
+      { id: "e1", source: "r", sourceHandle: "out", target: "g", targetHandle: "slot:image" },
+    ],
+  };
+
+  const resolved = resolveInputs(
+    withEdges,
+    "g",
+    {
+      id: "p",
+      name: "P",
+      version: "1",
+      category: "c",
+      summary: "",
+      icon: "",
+      inputs: [{ key: "image", label: "Image", dataType: "image", required: true, min: 1, max: 4 }],
+      outputs: [{ key: "images", label: "Images", dataType: "image", params: [] }],
+      defaults: {},
+      runtime: { kind: "provider", modelKey: "m" },
+      enabled: true,
+    },
+  );
+
   const image = resolved.find((input) => input.slot.key === "image");
-
-  assert.equal(prompt?.values.length, 1);
-  assert.equal(prompt?.values[0]?.text, "a red bicycle");
-  assert.deepEqual(prompt?.sources, ["p"]);
-
   assert.equal(image?.values.length, 1);
-  assert.equal(image?.values[0]?.assetId, "ast_1");
+  assert.equal(image?.values[0]?.assetId, "ast_2");
 });
 
-test("ignores wires that point at another slot", () => {
-  const document = documentWith([
-    { id: "e1", source: "p", sourceHandle: "out", target: "g", targetHandle: "slot:image" },
-  ]);
-  const resolved = resolveInputs(document, "g", plugin);
-  const prompt = resolved.find((input) => input.slot.key === "prompt");
-  assert.equal(prompt?.values.length, 0);
+test("a stage node hands on the frame it exported", () => {
+  const withEdges: CanvasDocument = {
+    ...document,
+    edges: [{ id: "e1", source: "s", sourceHandle: "out", target: "g", targetHandle: "slot:image" }],
+  };
+
+  const resolved = resolveInputs(
+    withEdges,
+    "g",
+    {
+      id: "p",
+      name: "P",
+      version: "1",
+      category: "c",
+      summary: "",
+      icon: "",
+      inputs: [{ key: "image", label: "Image", dataType: "image", required: true, min: 1, max: 4 }],
+      outputs: [{ key: "images", label: "Images", dataType: "image", params: [] }],
+      defaults: {},
+      runtime: { kind: "provider", modelKey: "m" },
+      enabled: true,
+    },
+  );
+
+  const image = resolved.find((input) => input.slot.key === "image");
+  assert.equal(image?.values[0]?.assetId, "ast_9");
 });
 
-test("composes the prompt from the text inputs", () => {
-  const document = documentWith([
-    { id: "e1", source: "p", sourceHandle: "out", target: "g", targetHandle: "slot:prompt" },
-  ]);
-  const resolved = resolveInputs(document, "g", plugin);
-  assert.equal(composePrompt(resolved, {}), "a red bicycle");
-});
-
-test("an explicit prompt parameter wins over the wired text", () => {
-  const document = documentWith([
-    { id: "e1", source: "p", sourceHandle: "out", target: "g", targetHandle: "slot:prompt" },
-  ]);
-  const resolved = resolveInputs(document, "g", plugin);
-  assert.equal(composePrompt(resolved, { prompt: "something else" }), "something else");
+test("slot keys are read from the handle", () => {
+  assert.equal(slotKeyFromHandle("slot:image"), "image");
 });

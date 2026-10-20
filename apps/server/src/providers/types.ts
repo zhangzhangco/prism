@@ -6,6 +6,12 @@ export interface ProviderInputValue {
   assetId?: string;
   url?: string;
   mime?: string;
+  /**
+   * Where the bytes live on this machine. Providers that need the original
+   * file — an edit endpoint, a local resampler — read it from here instead of
+   * fetching it back over the network.
+   */
+  localPath?: string;
   /** Set for text inputs. */
   text?: string;
 }
@@ -35,6 +41,12 @@ export interface ProviderResult {
   assets?: ProviderOutputAsset[];
   text?: string;
   error?: string;
+  /**
+   * Set when the backend produced a synthetic image rather than a real
+   * generation. The client surfaces this so a demo result is never mistaken
+   * for a model output.
+   */
+  synthetic?: boolean;
 }
 
 export interface ProviderTask {

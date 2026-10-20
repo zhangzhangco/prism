@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { assetPath } from "../storage.js";
 import { join } from "node:path";
 import type { RunStatus } from "@prism/contracts";
+import type { AssetRef } from "@prism/contracts";
 import type { ServerConfig } from "../config.js";
 import { assertInputsSatisfied, composePrompt, resolveInputs, GraphResolutionError } from "../graph.js";
 import { runLocal } from "../local/executors.js";
@@ -21,6 +22,8 @@ import type { RunsStore } from "../store/runs.js";
  * rather than in memory: a restart loses no queued work, and the client can
  * always ask the server what happened.
  */
+const MAX_ATTEMPTS = 3;
+
 export class Runner {
   private running = false;
   private timer: NodeJS.Timeout | null = null;
@@ -40,6 +43,7 @@ export class Runner {
   start(): void {
     if (this.running) return;
     this.running = true;
+    this.recoverInterrupted();
     const tick = () => {
       void this.tick().catch((error) => {
         console.error("[runner] tick failed", error);
@@ -48,6 +52,36 @@ export class Runner {
     tick();
     this.timer = setInterval(tick, this.deps.config.pollIntervalMs);
     this.timer.unref?.();
+  }
+
+  /**
+   * Deal with runs that were in flight when the process stopped.
+   *
+   * A provider cannot be re-attached to, so an interrupted run is started
+   * again from the beginning. After a few attempts it is failed with a clear
+   * reason rather than being retried for ever.
+   */
+  private recoverInterrupted(): void {
+    const { runs } = this.deps;
+    const interrupted = runs.findInterrupted();
+    for (const run of interrupted) {
+      const attempts = runs.attemptsFor(run.id);
+      if (attempts >= MAX_ATTEMPTS) {
+        runs.failInterrupted(
+          run.id,
+          "The run was interrupted too many times and could not be resumed.",
+        );
+        continue;
+      }
+      runs.requeue(run.id);
+    }
+    if (interrupted.length > 0) {
+      console.log(
+        `[runner] recovered ${interrupted.length} interrupted run(s): ${interrupted
+          .map((run) => run.id)
+          .join(", ")}`,
+      );
+    }
   }
 
   async stop(): Promise<void> {
@@ -114,18 +148,59 @@ export class Runner {
     const taskKey = plugin.outputs[0]?.key ?? "output";
     const runtime = (plugin as { runtime: { kind: string; modelKey?: string } }).runtime;
 
+    // Give providers a direct path to the bytes of every referenced image, so
+    // they do not have to fetch it back over the network.
+    const inputs = Object.fromEntries(
+      resolved.map((input) => [
+        input.slot.key,
+        input.values.map((value) => {
+          if (value.kind !== "image" || !value.assetId) return value;
+          const asset = assets.get(run.userId, value.assetId);
+          if (!asset) return value;
+          return {
+            ...value,
+            localPath: assetPath(config.storageDir, run.userId, asset.id, asset.filename),
+          };
+        }),
+      ]),
+    );
+
     // A local runtime runs in process and finishes immediately.
     if (runtime.kind === "local") {
       try {
-        const result = runLocal(plugin.id, {
+        const result = await runLocal(plugin.id, {
           prompt: composePrompt(resolved, run.params),
           params: run.params,
+          inputs,
         });
+
+        const produced: AssetRef[] = [];
+        for (const [index, image] of (result.images ?? []).entries()) {
+          const filename = image.filename || `output-${index + 1}.png`;
+          const directory = join(config.storageDir, run.userId);
+          await mkdir(directory, { recursive: true });
+          const row = assets.create({
+            userId: run.userId,
+            canvasId: run.canvasId,
+            mime: image.mime,
+            filename,
+            bytes: image.data.byteLength,
+            width: image.width,
+            height: image.height,
+          });
+          await writeFile(
+            assetPath(config.storageDir, run.userId, row.id, filename),
+            image.data,
+          );
+          produced.push(toAssetRef(row, config.publicBaseUrl));
+        }
+
         runs.upsertTask({
           runId: run.id,
           key: taskKey,
           status: "succeeded",
           text: result.text,
+          assets: produced,
         });
         runs.setStatus(run.id, "succeeded");
       } catch (error) {
@@ -142,7 +217,7 @@ export class Runner {
       modelKey: runtime.kind === "provider" ? (runtime.modelKey ?? "") : "",
       prompt: composePrompt(resolved, run.params),
       params: run.params,
-      inputs: Object.fromEntries(resolved.map((input) => [input.slot.key, input.values])),
+      inputs,
     };
 
     const matching = providers.resolve(request.modelKey);
@@ -211,6 +286,7 @@ export class Runner {
         status: "succeeded",
         assets: stored,
         text: result.text,
+        synthetic: result.synthetic,
       });
       runs.setStatus(runId, "succeeded");
       return;

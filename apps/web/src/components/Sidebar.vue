@@ -16,6 +16,7 @@ const palette: PaletteEntry[] = [
   { kind: "text", label: "Text", hint: "A block of text" },
   { kind: "image", label: "Image", hint: "Upload an image" },
   { kind: "generator", label: "Generator", hint: "Run a model" },
+  { kind: "stage", label: "Stage", hint: "Compose a 3D shot" },
 ];
 
 async function open(id: string): Promise<void> {

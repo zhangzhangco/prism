@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import { useCatalogStore } from "@/stores";
 import { useCanvasStore } from "@/stores/canvas";
 import { useSessionStore } from "@/stores";
@@ -8,6 +8,7 @@ import TopBar from "@/components/TopBar.vue";
 import Sidebar from "@/components/Sidebar.vue";
 import CanvasBoard from "@/components/CanvasBoard.vue";
 import Inspector from "@/components/Inspector.vue";
+import DirectorConsole from "@/components/DirectorConsole.vue";
 
 const session = useSessionStore();
 const catalog = useCatalogStore();
@@ -15,6 +16,17 @@ const canvas = useCanvasStore();
 
 const ready = ref(false);
 const bootError = ref<string | null>(null);
+
+/** Save the canvas when the tab is hidden or closed. */
+function onUnload(): void {
+  canvas.flushSaveOnUnload();
+}
+
+function onVisibilityChange(): void {
+  if (document.visibilityState === "hidden") {
+    canvas.flushSaveOnUnload();
+  }
+}
 
 onMounted(async () => {
   await session.restore();
@@ -28,7 +40,14 @@ onMounted(async () => {
       bootError.value = cause instanceof Error ? cause.message : "Could not load the workspace";
     }
   }
+  window.addEventListener("beforeunload", onUnload);
+  document.addEventListener("visibilitychange", onVisibilityChange);
   ready.value = true;
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("beforeunload", onUnload);
+  document.removeEventListener("visibilitychange", onVisibilityChange);
 });
 </script>
 
@@ -47,6 +66,12 @@ onMounted(async () => {
         </main>
         <Inspector />
       </div>
+
+      <DirectorConsole
+        v-if="canvas.consoleNodeId"
+        :node-id="canvas.consoleNodeId"
+        @close="canvas.consoleNodeId = null"
+      />
     </template>
 
     <p v-if="bootError" class="boot-error">{{ bootError }}</p>

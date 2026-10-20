@@ -115,7 +115,7 @@ export function builtinPlugins(): PluginManifest[] {
       name: "Upscale",
       version: "1.0.0",
       category: "edit",
-      summary: "Increase the resolution of an existing image.",
+      summary: "Enlarge the resolution of an existing image.",
       icon: "arrows-out",
       inputs: [
         {
@@ -147,7 +147,9 @@ export function builtinPlugins(): PluginManifest[] {
         },
       ],
       defaults: { factor: "2x" },
-      runtime: { kind: "provider", modelKey: "prism-diffusion-xl" },
+      // Resampling happens in process, so the result is a real enlargement of
+      // the source rather than a model approximation.
+      runtime: { kind: "local" },
       enabled: true,
     },
     {

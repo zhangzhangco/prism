@@ -14,7 +14,8 @@
     "typecheck": "pnpm --filter @prism/contracts build && pnpm -r typecheck",
     "test": "pnpm --filter @prism/contracts build && pnpm -r test",
     "db:migrate": "pnpm --filter @prism/server db:migrate",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "pnpm --filter @prism/contracts build && node scripts/smoke.mjs",
+    "test:recovery": "pnpm --filter @prism/contracts build && pnpm --filter @prism/server build && node scripts/recovery.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

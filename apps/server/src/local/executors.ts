@@ -1,21 +1,30 @@
+import { readFile } from "node:fs/promises";
+import { decodePng, type DecodedImage } from "../png-decode.js";
+import { encodeDecodedPng, resample } from "../resample.js";
+import type { ProviderInputValue } from "../providers/types.js";
+
 /**
  * Local runtimes.
  *
- * Some generators do not need a model at all — they transform text in
- * process. They are declared with `runtime: { kind: "local" }` and executed
- * here, synchronously, without touching a provider.
+ * Some generators do not need a model at all — they transform text or image
+ * data in process. They are declared with `runtime: { kind: "local" }` and
+ * executed here, without touching a provider.
  */
 
 export interface LocalRequest {
   prompt: string;
   params: Record<string, unknown>;
+  /** Collected slot values, keyed by slot key. */
+  inputs?: Record<string, ProviderInputValue[]>;
 }
 
 export interface LocalResult {
   text?: string;
+  /** Images produced locally, for example a resampled source image. */
+  images?: { data: Buffer; mime: string; filename: string; width: number; height: number }[];
 }
 
-export type LocalExecutor = (request: LocalRequest) => LocalResult;
+export type LocalExecutor = (request: LocalRequest) => LocalResult | Promise<LocalResult>;
 
 const OPENERS: Record<string, string[]> = {
   descriptive: [
@@ -60,15 +69,53 @@ const promptSculptor: LocalExecutor = ({ prompt, params }) => {
   return { text: words.length <= maxWords ? text : `${words.slice(0, maxWords).join(" ")}…` };
 };
 
+/**
+ * Enlarge the source image.
+ *
+ * This is a real resample of the input rather than a stand-in: the output
+ * pixels come from the source, so the result is visibly the same picture at
+ * a larger size.
+ */
+async function upscaleImage({ params, inputs }: LocalRequest): Promise<LocalResult> {
+  const sources = Object.values(inputs ?? {})
+    .flat()
+    .filter((value) => value.kind === "image");
+  const source = sources[0];
+  if (!source?.localPath) {
+    throw new Error("Upscale needs an image to work from");
+  }
+
+  const bytes = await readFile(source.localPath);
+  const decoded = decodePng(bytes);
+  const factor = params.factor === "4x" ? 4 : 2;
+
+  const scaled = resample(decoded, decoded.width * factor, decoded.height * factor);
+  return {
+    images: [
+      {
+        data: encodeDecodedPng(scaled),
+        mime: "image/png",
+        filename: `upscale-${factor}x.png`,
+        width: scaled.width,
+        height: scaled.height,
+      },
+    ],
+  };
+}
+
 const executors: Record<string, LocalExecutor> = {
   "prompt-sculptor": promptSculptor,
+  upscale: upscaleImage,
 };
 
 export function hasLocalExecutor(pluginId: string): boolean {
   return pluginId in executors;
 }
 
-export function runLocal(pluginId: string, request: LocalRequest): LocalResult {
+export async function runLocal(
+  pluginId: string,
+  request: LocalRequest,
+): Promise<LocalResult> {
   const executor = executors[pluginId];
   if (!executor) {
     throw new Error(`No local runtime is registered for "${pluginId}"`);

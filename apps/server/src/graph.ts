@@ -16,7 +16,6 @@ export interface ResolvedInput {
   /** Ids of the nodes that contributed, for auditing. */
   sources: string[];
 }
-
 export class GraphResolutionError extends Error {
   constructor(
     message: string,
@@ -37,6 +36,28 @@ function findNode(document: CanvasDocument, nodeId: string): CanvasNode | undefi
   return document.nodes.find((node) => node.id === nodeId);
 }
 
+/** A stored asset as it appears inside a node's data. */
+interface NodeAsset {
+  id: string;
+  url: string;
+  mime?: string;
+}
+
+function toProviderImage(asset: NodeAsset): ProviderInputValue {
+  return {
+    kind: "image",
+    assetId: asset.id,
+    url: asset.url,
+    ...(asset.mime ? { mime: asset.mime } : {}),
+  };
+}
+
+function isNodeAsset(value: unknown): value is NodeAsset {
+  if (!value || typeof value !== "object") return false;
+  const asset = value as Record<string, unknown>;
+  return typeof asset.id === "string" && typeof asset.url === "string";
+}
+
 function valuesFromNode(node: CanvasNode): ProviderInputValue[] {
   const data = node.data ?? {};
 
@@ -45,25 +66,36 @@ function valuesFromNode(node: CanvasNode): ProviderInputValue[] {
     return text.trim() ? [{ kind: "text", text }] : [];
   }
 
-  if (node.kind === "image") {
+  if (node.kind === "image" || node.kind === "result") {
     const assets = Array.isArray(data.assets) ? data.assets : [];
-    return assets
-      .filter((asset): asset is { id: string; url: string; mime?: string } =>
-        Boolean(asset && typeof asset.id === "string" && typeof asset.url === "string"),
-      )
-      .map((asset) => ({
-        kind: "image" as const,
-        assetId: asset.id,
-        url: asset.url,
-        ...(asset.mime ? { mime: asset.mime } : {}),
-      }));
+
+    // A result node can carry several outputs. When the user has picked one,
+    // that is the single value the wire carries.
+    const selected = typeof data.selectedAssetId === "string" ? data.selectedAssetId : null;
+    if (selected) {
+      const chosen = assets.find((asset) => isNodeAsset(asset) && asset.id === selected);
+      return chosen ? [toProviderImage(chosen)] : [];
+    }
+
+    return assets.filter(isNodeAsset).map(toProviderImage);
+  }
+
+  if (node.kind === "stage") {
+    // A 3D stage hands on the frame its active camera produced.
+    const frame = data.frame;
+    return isNodeAsset(frame) ? [toProviderImage(frame)] : [];
   }
 
   if (node.kind === "collection") {
     const items = Array.isArray(data.items) ? data.items : [];
     return items
       .filter((item): item is { assetId: string; url: string; mime?: string } =>
-        Boolean(item && typeof item.assetId === "string" && typeof item.url === "string"),
+        Boolean(
+          item &&
+            typeof item === "object" &&
+            typeof (item as { assetId?: unknown }).assetId === "string" &&
+            typeof (item as { url?: unknown }).url === "string",
+        ),
       )
       .map((item) => ({
         kind: "image" as const,

@@ -1,4 +1,6 @@
-import { ProviderError, type GenerationProvider, type ProviderOutputAsset, type ProviderRequest, type ProviderResult, type ProviderTask } from "./types.js";
+import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
+import { ProviderError, type GenerationProvider, type ProviderInputValue, type ProviderOutputAsset, type ProviderRequest, type ProviderResult, type ProviderTask } from "./types.js";
 
 /**
  * Adapter for any server that speaks the OpenAI image-generation dialect.
@@ -50,31 +52,20 @@ export class OpenAiCompatibleProvider implements GenerationProvider {
     const doFetch = this.options.fetchImpl ?? fetch;
     const prompt = this.buildPrompt(request);
     const count = typeof request.params.count === "number" ? request.params.count : 1;
+    const references = this.referenceImages(request);
 
-    let response: Response;
-    try {
-      response = await doFetch(`${this.options.baseUrl.replace(/\/$/, "")}/images/generations`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.options.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: this.options.model,
-          prompt,
-          n: Math.min(4, Math.max(1, count)),
-          size: typeof request.params.size === "string" ? request.params.size : "1024x1024",
-          quality: typeof request.params.quality === "string" ? request.params.quality : undefined,
-          response_format: "b64_json",
-        }),
-      });
-    } catch (error) {
-      throw new ProviderError("Could not reach the image endpoint", error);
-    }
+    // A run with a reference image is an edit; without one it is a plain
+    // generation. The two use different endpoints on OpenAI-compatible
+    // servers, so the request is shaped to match.
+    const response = references.length
+      ? await this.callEdits(doFetch, request, prompt, count, references)
+      : await this.callGenerations(doFetch, request, prompt, count);
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new ProviderError(`Image endpoint responded with ${response.status}: ${body.slice(0, 300)}`);
+      throw new ProviderError(
+        `Image endpoint responded with ${response.status}: ${body.slice(0, 300)}`,
+      );
     }
 
     const payload = (await response.json()) as ChatCompletionResponse;
@@ -107,6 +98,76 @@ export class OpenAiCompatibleProvider implements GenerationProvider {
       return { status: "failed", error: "The endpoint returned no images" };
     }
     return { status: "succeeded", assets };
+  }
+
+  private async callGenerations(
+    doFetch: typeof fetch,
+    request: ProviderRequest,
+    prompt: string,
+    count: number,
+  ): Promise<Response> {
+    return doFetch(`${this.baseUrl()}/images/generations`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.options.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.options.model,
+        prompt,
+        n: Math.min(4, Math.max(1, count)),
+        size: typeof request.params.size === "string" ? request.params.size : "1024x1024",
+        quality: typeof request.params.quality === "string" ? request.params.quality : undefined,
+        response_format: "b64_json",
+      }),
+    });
+  }
+
+  private async callEdits(
+    doFetch: typeof fetch,
+    request: ProviderRequest,
+    prompt: string,
+    count: number,
+    references: ProviderInputValue[],
+  ): Promise<Response> {
+    const form = new FormData();
+    form.append("model", this.options.model);
+    form.append("prompt", prompt);
+    form.append("n", String(Math.min(4, Math.max(1, count))));
+    form.append("size", typeof request.params.size === "string" ? request.params.size : "1024x1024");
+
+    for (const [index, reference] of references.entries()) {
+      const localPath = reference.localPath;
+      const bytes = localPath ? await readFile(localPath) : await this.download(reference.url!);
+      const name = localPath ? basename(localPath) : `reference-${index + 1}.png`;
+      form.append("image", new Blob([bytes], { type: reference.mime ?? "image/png" }), name);
+    }
+
+    return doFetch(`${this.baseUrl()}/images/edits`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.options.apiKey}` },
+      body: form,
+    });
+  }
+
+  private async download(url: string): Promise<Buffer> {
+    const doFetch = this.options.fetchImpl ?? fetch;
+    const response = await doFetch(url);
+    if (!response.ok) {
+      throw new ProviderError(`Could not fetch the reference image (${response.status})`);
+    }
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  /** The reference images of a run, in slot order. */
+  private referenceImages(request: ProviderRequest): ProviderInputValue[] {
+    return Object.values(request.inputs)
+      .flat()
+      .filter((value) => value.kind === "image");
+  }
+
+  private baseUrl(): string {
+    return this.options.baseUrl.replace(/\/$/, "");
   }
 
   private buildPrompt(request: ProviderRequest): string {

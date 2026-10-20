@@ -99,7 +99,15 @@ export const api = {
 
   models: () => request<{ models: ModelDescriptor[] }>("/api/models"),
 
-  startRun: (canvasId: string, body: { nodeId: string; pluginId: string; params?: Record<string, unknown> }) =>
+  startRun: (
+    canvasId: string,
+    body: {
+      nodeId: string;
+      pluginId: string;
+      params?: Record<string, unknown>;
+      documentFingerprint?: string;
+    },
+  ) =>
     request<{ run: Run }>(`/api/canvases/${canvasId}/runs`, {
       method: "POST",
       body: JSON.stringify(body),
@@ -128,5 +136,29 @@ export const api = {
       );
     }
     return payload.asset;
+  },
+
+  /**
+   * Write a canvas without waiting for it.
+   *
+   * Used when the tab is closing: a `keepalive` request survives the
+   * navigation, and it carries the bearer token like every other call.
+   */
+  saveCanvasKeepalive: (canvasId: string, document: CanvasDocument, name?: string): boolean => {
+    if (!token) return false;
+    try {
+      void fetch(`/api/canvases/${canvasId}`, {
+        method: "PATCH",
+        keepalive: true,
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ document, name }),
+      }).catch(() => undefined);
+      return true;
+    } catch {
+      return false;
+    }
   },
 };
