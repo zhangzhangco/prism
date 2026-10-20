@@ -117,6 +117,8 @@ export const api = {
 
   listRuns: (canvasId: string) => request<{ runs: Run[] }>(`/api/canvases/${canvasId}/runs`),
 
+  listAssets: () => request<{ assets: AssetRef[] }>("/api/assets"),
+
   uploadAsset: async (canvasId: string, file: File): Promise<AssetRef> => {
     const form = new FormData();
     form.append("file", file);

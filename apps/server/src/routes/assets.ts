@@ -41,6 +41,24 @@ export function registerAssetRoutes(app: FastifyInstance, context: AssetRouteCon
     },
   );
 
+  app.get<{ Params: { id: string } }>(
+    "/api/canvases/:id/assets",
+    { preHandler: auth },
+    async (request, reply) => {
+      const assets = context.assets.listForCanvas(currentUserId(request), request.params.id);
+      return reply.send({
+        assets: assets.map((asset) => toAssetRef(asset, context.config.publicBaseUrl)),
+      });
+    },
+  );
+
+  app.get("/api/assets", { preHandler: auth }, async (request, reply) => {
+    const assets = context.assets.listForUser(currentUserId(request));
+    return reply.send({
+      assets: assets.map((asset) => toAssetRef(asset, context.config.publicBaseUrl)),
+    });
+  });
+
   app.post<{ Params: { id: string } }>(
     "/api/canvases/:id/assets",
     { preHandler: auth },

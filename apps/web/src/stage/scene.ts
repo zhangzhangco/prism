@@ -106,8 +106,8 @@ export function createStageScene(
   scene.background = new THREE.Color("#f0f2f5");
 
   const editorCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 500);
-  editorCamera.position.set(5, 4, 7);
-  editorCamera.lookAt(0, 1, 0);
+  editorCamera.position.set(3.6, 2.4, 4.4);
+  editorCamera.lookAt(0, 1.05, 0);
 
   const shotCamera = new THREE.PerspectiveCamera(45, 1, 0.1, 500);
 

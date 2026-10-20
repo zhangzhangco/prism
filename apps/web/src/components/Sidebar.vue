@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useCatalogStore } from "@/stores";
 import { useCanvasStore } from "@/stores/canvas";
+import LibraryPanel from "@/components/LibraryPanel.vue";
 
 const catalog = useCatalogStore();
 const canvas = useCanvasStore();
@@ -66,5 +67,7 @@ function add(kind: string): void {
         </button>
       </div>
     </section>
+
+    <LibraryPanel />
   </aside>
 </template>

@@ -33,22 +33,39 @@ it at a different provider when you are ready.
 ## Features
 
 - **Infinite canvas** built on [Vue Flow](https://vueflow.dev) — pan, zoom,
-  minimap, snap-to-grid, and a node inspector.
+  minimap, snap-to-grid, and a node inspector. The viewport is saved with the
+  document, so reopening a canvas returns to where you left it.
 - **Declarative plugins.** A generator is described by a manifest: the input
   slots it consumes, the output it produces, and the parameters the user can
   change. Adding a generator never touches the canvas code.
 - **The server resolves the graph.** A run request names a node and its
   parameters; the server walks the stored document, collects the values on the
-  wires feeding that node, and composes the prompt.
+  wires feeding that node, and composes the prompt. A run also carries a
+  fingerprint of the document, so the server refuses to work against a graph
+  that is older than the one on screen.
+- **Results feed the next step.** A finished run leaves a node — an image node
+  for image outputs, a text node for text outputs — wired to the generator
+  that produced it. A result with several outputs lets you pick which one
+  travels along the wire.
 - **A real task queue.** Runs are persisted, picked up by a worker with a
-  concurrency limit, and polled until they settle. A restart loses no work.
+  concurrency limit, and polled until they settle. A restart does not lose
+  work: interrupted runs are picked up again, and a run that cannot be
+  resumed says so instead of hanging.
 - **Pluggable providers.** A small adapter interface with two implementations
   out of the box: a local backend that needs no credentials, and an adapter
   for any OpenAI-compatible image endpoint.
 - **Local runtimes.** Generators that do not need a model at all run in
-  process.
-- **Asset library.** Uploads and generated outputs are stored on disk and
-  served behind the API's bearer token.
+  process. `Upscale` is one of them: it resamples the source image with a
+  Lanczos kernel, so the result really is the input at a larger size.
+- **A 3D stage.** A stage node opens a console where you place actors, props
+  and scenery, frame the shot with a camera, and export that view as an
+  image you can feed into a generator. The scene is saved with the canvas.
+  ![The 3D stage](docs/stage.png)
+- **A library.** Every asset and every run is listed next to the canvas, and
+  a click puts the result back on the canvas.
+- **Honest output.** The built-in backend marks what it produces: those
+  results are flagged as synthetic, labelled as such on the node, and carry a
+  hatch pattern so nobody mistakes them for a model output.
 
 ## Requirements
 
@@ -69,17 +86,19 @@ an empty canvas.
 Add a **Prompt** node, a **Generator** node, drag from the prompt's output
 handle to the generator's `Prompt` input, and press **Run**.
 
-### Running the smoke test
-
-With the server running:
+### Checking a change
 
 ```bash
-node scripts/smoke.mjs
+pnpm typecheck     # tsc across the workspace
+pnpm test          # unit tests
+pnpm smoke         # end-to-end, needs a running server
+pnpm test:recovery # interrupts a run and checks it recovers
 ```
 
-It signs up, creates a canvas, wires a prompt into a generator, runs it, checks
-that the produced bytes are a PNG, and verifies that the server followed the
-wire when resolving inputs.
+`pnpm smoke` covers the paths that are easy to get subtly wrong: a run against
+a changed graph is refused, a result can be wired into the next generator, a
+reference image reaches the backend, an upscale is twice the size of its
+input, and a demo result is flagged as one.
 
 ## Configuration
 
@@ -170,6 +189,8 @@ except for registration and login.
 | `DELETE` | `/api/canvases/:id` | Delete a canvas |
 | `GET` | `/api/plugins` | Plugin catalog |
 | `GET` | `/api/models` | Model catalog |
+| `GET` | `/api/assets` | Every asset of the account |
+| `GET` | `/api/canvases/:id/assets` | Assets of one canvas |
 | `POST` | `/api/canvases/:id/assets` | Upload a file |
 | `GET` | `/api/assets/:id` | Download a file |
 | `POST` | `/api/canvases/:id/runs` | Start a generation |

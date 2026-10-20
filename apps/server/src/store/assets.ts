@@ -70,6 +70,14 @@ export class AssetsStore {
       .all(userId, canvasId);
     return rows.map((row) => toAsset(row as Record<string, unknown>));
   }
+
+  /** Every asset the account owns, newest first. */
+  listForUser(userId: string, limit = 200): AssetRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM assets WHERE user_id = ? ORDER BY created_at DESC LIMIT ?")
+      .all(userId, limit);
+    return rows.map((row) => toAsset(row as Record<string, unknown>));
+  }
 }
 
 function toAsset(row: Record<string, unknown>): AssetRow {

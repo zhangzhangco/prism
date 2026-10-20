@@ -62,7 +62,8 @@ function addObject(kind: StageObjectKind): void {
     id: `object-${Date.now().toString(36)}-${index}`,
     name: `${kind === "figure" ? "Actor" : "Object"} ${index}`,
     kind,
-    position: { x: (index - 1) * 1.4 - 1.4, y: 0, z: 0 },
+    // Place new objects beside the existing ones rather than on top of them.
+    position: { x: (index - 1) * 1.6 - 1.2, y: 0, z: 0.4 },
     rotation: { x: 0, y: 0, z: 0 },
     scale: { x: 1, y: 1, z: 1 },
     color: kind === "figure" ? "#4c6ef5" : "#868e96",

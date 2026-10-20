@@ -510,6 +510,73 @@ textarea {
   word-break: break-all;
 }
 
+/* ---------- library ---------- */
+
+.library__tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.library__tabs button {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.library__tabs button.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 550;
+}
+
+.library__actions {
+  margin-bottom: 8px;
+}
+
+.library__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.library__cell {
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  line-height: 0;
+  background: var(--surface-muted);
+}
+
+.library__cell:hover {
+  border-color: var(--accent);
+  background: var(--surface-muted);
+}
+
+.library__cell .node__thumb {
+  border: none;
+  border-radius: 0;
+}
+
+.library__runs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.library__run-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
 /* ---------- director's console ---------- */
 
 .console {
