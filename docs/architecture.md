@@ -87,6 +87,12 @@ document it is looking at. The server compares that with the stored document
 and refuses the run with `409 stale_document` if they differ. The client
 saves and retries once. A run can therefore never silently use a stale graph.
 
+**A run keeps the inputs it was submitted with.** The inputs are resolved
+when the run is accepted, against the document as it stands at that moment,
+and stored with the run. The worker uses that snapshot rather than re-reading
+the canvas, so a change made while the run was queued cannot alter what it
+consumes.
+
 **The input slot key is the address.** A plugin declares slots; an edge names
 the slot it feeds in `targetHandle` as `slot:<key>`; the provider receives the
 collected values under the same key. One convention, used everywhere.
@@ -94,6 +100,41 @@ collected values under the same key. One convention, used everywhere.
 **Runs are rows, not futures.** A run is a row in `runs` with a status. The
 worker polls the database for queued rows, so a restart loses nothing and the
 client can always ask what happened.
+
+## Wiring is type checked
+
+A node knows what it puts on its wire: text for a prompt, an image for an
+uploaded picture, a result or a 3D stage. A generator's slots know what they
+accept. The canvas refuses a connection between the two when the types do not
+match, so a picture cannot be dragged into a text slot.
+
+The server checks the same thing, and refuses a run whose required slot came
+up empty.
+
+## Models and parameters
+
+A model owns its parameters. The catalogue entry lists what the model accepts
+and the values it allows, and the client renders exactly that on the node.
+The plugin contributes parameters of its own — a free-text prompt, for
+instance — which are shown alongside the model's. When both define the same
+key, the model's definition wins.
+
+The server checks the submitted parameters against the model before the run
+is queued. A value the backend would refuse is reported rather than quietly
+changed: turning `standard` into `medium` without saying so would hide the
+fact that the request was not what the user asked for.
+
+Each model also declares a **dialect**, which is how the request is shaped:
+
+| Dialect | Behaviour |
+| --- | --- |
+| `mock` | The built-in backend. |
+| `gpt-image` | Returns base64 unconditionally and rejects the legacy `response_format` field, so it is never sent. Takes `background` and `output_format`. |
+| `dall-e` | Expects `response_format`, knows only its own quality names, and cannot work from a reference image. |
+| `generic` | The conservative middle ground. |
+
+A run records the model it was submitted against, so the record says which
+model produced an image.
 
 ## Interrupted runs
 
@@ -103,9 +144,10 @@ beginning; after three attempts it is failed with a reason rather than being
 retried for ever. A run is never left showing "running" with nobody working
 on it.
 
-The caveat is worth stating plainly: a provider that bills on submission will
-bill again when an interrupted run is repeated. A deployment that cares should
-give its provider an idempotency key derived from the run id.
+Every provider request carries an `Idempotency-Key` derived from the run id,
+so a provider that honours one will not bill the same job twice when a run
+is repeated. The caveat is worth stating plainly: a provider that ignores
+the header will bill the first attempt, and the repeated one as well.
 
 ## Task lifecycle
 
@@ -136,17 +178,26 @@ interface GenerationProvider {
 ```
 
 A provider is asked whether it can serve a model, is handed a job, and is then
-polled until the job settles. Two implementations ship with Prism:
+polled until the job settles. Three implementations ship with Prism:
 
 - `mock` — produces real PNG bytes from a deterministic gradient derived from
   the prompt. No credentials, no network. A reference image is composited into
   the output, so the input demonstrably changes the result.
-- `openai-compatible` — posts to `/images/generations`, or to
-  `/images/edits` with the reference images attached when the run has any.
+- `openai-compatible` — serves the models whose provider is
+  `openai-compatible`, shaping the request for the model's dialect. A run
+  with a reference image goes to `/images/edits` with the image attached;
+  without one it goes to `/images/generations`.
 
-The PNG encoder lives in `apps/server/src/png.ts` and its counterpart
+The PNG encoder lives in `apps/server/src/png.js` and its counterpart
 `apps/server/src/png-decode.ts` so the built-in backend has no image
 dependency and can read back what it wrote.
+
+`scripts/fake-openai.mjs` is a stand-in for the endpoint. It is deliberately
+strict, because the point is to catch the mistakes a lenient mock would hide:
+it rejects `response_format` the way the GPT Image family does, it rejects a
+size or quality the model does not accept, it requires an image part on an
+edit, and it honours `Idempotency-Key` so a repeated request returns the
+first answer instead of producing a second job.
 
 ### Synthetic output is marked as such
 

@@ -8,8 +8,15 @@ export interface RunRow {
   canvasId: string;
   nodeId: string;
   pluginId: string;
+  modelKey: string;
   status: RunStatus;
   params: Record<string, unknown>;
+  /**
+   * The inputs the run was submitted with, captured at that moment. The
+   * worker uses this snapshot rather than re-reading the canvas, so a run
+   * cannot pick up changes made while it was queued.
+   */
+  inputs: Record<string, unknown> | null;
   error: string | null;
   attempts: number;
   createdAt: string;
@@ -24,14 +31,16 @@ export class RunsStore {
     canvasId: string;
     nodeId: string;
     pluginId: string;
+    modelKey: string;
     params: Record<string, unknown>;
+    inputs?: Record<string, unknown>;
   }): RunRow {
     const id = newId("run");
     const now = new Date().toISOString();
     this.db
       .prepare(
-        `INSERT INTO runs(id, user_id, canvas_id, node_id, plugin_id, status, params, error, created_at, updated_at)
-         VALUES(?, ?, ?, ?, ?, 'queued', ?, NULL, ?, ?)`,
+        `INSERT INTO runs(id, user_id, canvas_id, node_id, plugin_id, model_key, status, params, inputs, error, created_at, updated_at)
+         VALUES(?, ?, ?, ?, ?, ?, 'queued', ?, ?, NULL, ?, ?)`,
       )
       .run(
         id,
@@ -39,7 +48,9 @@ export class RunsStore {
         input.canvasId,
         input.nodeId,
         input.pluginId,
+        input.modelKey,
         JSON.stringify(input.params),
+        input.inputs ? JSON.stringify(input.inputs) : null,
         now,
         now,
       );
@@ -49,8 +60,10 @@ export class RunsStore {
       canvasId: input.canvasId,
       nodeId: input.nodeId,
       pluginId: input.pluginId,
+      modelKey: input.modelKey,
       status: "queued",
       params: input.params,
+      inputs: input.inputs ?? null,
       error: null,
       attempts: 0,
       createdAt: now,
@@ -217,8 +230,10 @@ function toRun(row: Record<string, unknown>): RunRow {
     canvasId: String(row.canvas_id),
     nodeId: String(row.node_id),
     pluginId: String(row.plugin_id),
+    modelKey: String(row.model_key ?? ""),
     status: String(row.status) as RunStatus,
     params,
+    inputs: row.inputs ? (JSON.parse(String(row.inputs)) as Record<string, unknown>) : null,
     error: row.error === null ? null : String(row.error),
     attempts: Number(row.attempts ?? 0),
     createdAt: String(row.created_at),

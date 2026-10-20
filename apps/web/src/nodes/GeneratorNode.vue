@@ -1,48 +1,65 @@
 <script setup lang="ts">
 import { Handle, Position, type NodeProps } from "@vue-flow/core";
 import { computed } from "vue";
+import { effectiveParams } from "@prism/contracts";
 import { useCatalogStore } from "@/stores";
 import { useCanvasStore } from "@/stores/canvas";
-import { SOURCE_HANDLE, slotHandle } from "@/graph/types";
+import { SOURCE_HANDLE, slotHandle, type GeneratorNodeData } from "@/graph/types";
 
 const props = defineProps<NodeProps>();
 const catalog = useCatalogStore();
 const canvas = useCanvasStore();
 
-const data = computed(() => props.data as {
-  pluginId: string;
-  params: Record<string, unknown>;
-  runId?: string;
-  status?: string;
-  error?: string;
-});
+const data = computed(() => props.data as unknown as GeneratorNodeData);
 
 const plugin = computed(() => catalog.pluginById.get(data.value.pluginId));
 
-const params = computed(() => {
-  const output = plugin.value?.outputs?.[0];
-  return output?.params ?? [];
+/**
+ * The models that can serve this plugin.
+ *
+ * A plugin that runs a model offers the models of the same kind; a plugin
+ * with a local runtime has no model to choose.
+ */
+const models = computed(() => {
+  const wanted = plugin.value?.outputs[0]?.dataType ?? "image";
+  return catalog.models.filter(
+    (model) => model.enabled && model.mediaType === wanted,
+  );
 });
+
+const selectedModel = computed(
+  () =>
+    catalog.models.find((model) => model.key === data.value.modelKey) ??
+    models.value[0],
+);
+
+const params = computed(() => effectiveParams(plugin.value!, selectedModel.value));
 
 const status = computed(() => data.value.status ?? "idle");
 
 function onPluginChange(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
   const next = catalog.pluginById.get(value);
-  const defaults = { ...(next?.defaults ?? {}) };
-  canvas.updateNodeData(props.id, { pluginId: value, params: defaults, error: undefined });
+  const modelKey =
+    next?.runtime.kind === "provider" ? next.runtime.modelKey : undefined;
+  canvas.updateNodeData(props.id, {
+    pluginId: value,
+    modelKey,
+    params: { ...(next?.defaults ?? {}) },
+    error: undefined,
+  });
+}
+
+function onModelChange(event: Event): void {
+  canvas.setModel(props.id, (event.target as HTMLSelectElement).value);
 }
 
 function onParamChange(key: string, event: Event): void {
   const element = event.target as HTMLInputElement | HTMLSelectElement;
-  const value =
-    element instanceof HTMLSelectElement || element.type === "checkbox"
-      ? element.type === "checkbox"
-        ? element.checked
-        : element.value
-      : element.type === "number"
-        ? Number(element.value)
-        : element.value;
+  let value: unknown = element.value;
+  if (element instanceof HTMLInputElement && element.type === "number") {
+    value = Number(element.value);
+  }
   canvas.setParam(props.id, key, value);
 }
 </script>
@@ -59,6 +76,15 @@ function onParamChange(key: string, event: Event): void {
         <select :value="data.pluginId" @change="onPluginChange">
           <option v-for="item in catalog.plugins" :key="item.id" :value="item.id">
             {{ item.name }}
+          </option>
+        </select>
+      </label>
+
+      <label v-if="models.length" class="node__field">
+        <span>Model</span>
+        <select :value="selectedModel?.key" @change="onModelChange">
+          <option v-for="model in models" :key="model.key" :value="model.key">
+            {{ model.label }}
           </option>
         </select>
       </label>

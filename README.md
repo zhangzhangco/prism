@@ -51,9 +51,13 @@ it at a different provider when you are ready.
   concurrency limit, and polled until they settle. A restart does not lose
   work: interrupted runs are picked up again, and a run that cannot be
   resumed says so instead of hanging.
-- **Pluggable providers.** A small adapter interface with two implementations
-  out of the box: a local backend that needs no credentials, and an adapter
-  for any OpenAI-compatible image endpoint.
+- **Pluggable providers.** A small adapter interface with three
+  implementations out of the box: a local backend that needs no credentials,
+  and adapters for the GPT Image and DALL·E dialects of the OpenAI image API.
+- **You choose the model.** A generator node lists the models the deployment
+  can serve, and the parameters on the node are the ones that model accepts —
+  a quality of `high` means something different to a different family, so the
+  values are checked before the request is sent.
 - **Local runtimes.** Generators that do not need a model at all run in
   process. `Upscale` is one of them: it resamples the source image with a
   Lanczos kernel, so the result really is the input at a larger size.
@@ -115,12 +119,21 @@ sensible default; see `.env.example` for the full list.
 | `PRISM_PUBLIC_BASE_URL` | `http://127.0.0.1:<port>` | Base URL used in asset links |
 | `PRISM_ALLOW_SIGNUP` | `true` | Allow new accounts |
 | `PRISM_OPENAI_BASE_URL` | `https://api.openai.com/v1` | Image endpoint |
-| `PRISM_OPENAI_API_KEY` | — | Enables the `openai-image` model |
-| `PRISM_OPENAI_MODEL` | `gpt-image-1` | Model id to request |
+| `PRISM_OPENAI_API_KEY` | — | Enables the models that endpoint serves |
 
-With `PRISM_OPENAI_API_KEY` set, a model called **OpenAI Image** appears in the
-catalog and any plugin bound to it is routed to that endpoint instead of the
-built-in backend.
+With `PRISM_OPENAI_API_KEY` set, the models that endpoint serves appear in
+the model list on a generator node, and picking one routes the run there
+instead of to the built-in backend. A run against a remote model is not
+marked as a demo.
+
+The endpoint is spoken to in the OpenAI image dialect, and the request is
+shaped for the model you picked:
+
+- the **GPT Image** family always returns base64 and rejects the legacy
+  `response_format` field, so it is never sent; it takes `background` and
+  `output_format` instead;
+- the **DALL·E** family expects `response_format` and knows only its own
+  quality names, and it cannot work from a reference image.
 
 ## Layout
 

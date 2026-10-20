@@ -106,7 +106,7 @@ const document = {
       id: "gen-1",
       kind: "generator",
       position: { x: 320, y: 0 },
-      data: { pluginId: "text-to-image", params: { ratio: "1:1" } },
+      data: { pluginId: "text-to-image", params: { size: "1024x1024" } },
     },
   ],
   edges: [
@@ -143,7 +143,7 @@ const stale = await api(`/api/canvases/${canvasId}/runs`, {
   body: {
     nodeId: "gen-1",
     pluginId: "text-to-image",
-    params: { ratio: "1:1" },
+    params: { size: "1024x1024" },
     documentFingerprint: "not-the-current-fingerprint",
   },
 });
@@ -160,7 +160,7 @@ const fresh = await api(`/api/canvases/${canvasId}/runs`, {
   body: {
     nodeId: "gen-1",
     pluginId: "text-to-image",
-    params: { ratio: "1:1" },
+    params: { size: "1024x1024" },
     documentFingerprint: documentFingerprint(document),
   },
 });
@@ -170,7 +170,7 @@ console.log("\ngeneration");
 const run = await api(`/api/canvases/${canvasId}/runs`, {
   method: "POST",
   token,
-  body: { nodeId: "gen-1", pluginId: "text-to-image", params: { ratio: "1:1" } },
+  body: { nodeId: "gen-1", pluginId: "text-to-image", params: { size: "1024x1024" } },
 });
 check("run is accepted", run.status === 202, `got ${run.status}`);
 const runId = run.payload?.run?.id;
@@ -220,7 +220,7 @@ await api(`/api/canvases/${chainedId}`, {
           id: "gen-2",
           kind: "generator",
           position: { x: 320, y: 0 },
-          data: { pluginId: "image-to-image", params: { ratio: "1:1" } },
+          data: { pluginId: "image-to-image", params: { size: "1024x1024" } },
         },
       ],
       edges: [
@@ -240,7 +240,7 @@ await api(`/api/canvases/${chainedId}`, {
 const chainedRun = await api(`/api/canvases/${chainedId}/runs`, {
   method: "POST",
   token,
-  body: { nodeId: "gen-2", pluginId: "image-to-image", params: { ratio: "1:1" } },
+  body: { nodeId: "gen-2", pluginId: "image-to-image", params: { size: "1024x1024" } },
 });
 check("the chained run is accepted", chainedRun.status === 202, `got ${chainedRun.status}`);
 const chainedFinal = await waitForRun(token, chainedRun.payload?.run?.id);
@@ -389,6 +389,83 @@ check(
   producedText.includes("a red bicycle"),
   producedText.slice(0, 120),
 );
+
+// When a remote endpoint is configured, the same path has to work against a
+// real provider, and the result must not be marked as a demo.
+if (process.env.PRISM_OPENAI_BASE_URL) {
+  console.log("\nremote model");
+  const remote = (models.payload?.models ?? []).find(
+    (model) => model.provider === "openai-compatible",
+  );
+  check("a remote model is offered", Boolean(remote), JSON.stringify(remote));
+
+  if (remote) {
+    const remoteCanvas = await api("/api/canvases", {
+      method: "POST",
+      token,
+      body: { name: "Remote canvas" },
+    });
+    const remoteId = remoteCanvas.payload?.canvas?.id;
+
+    await api(`/api/canvases/${remoteId}`, {
+      method: "PATCH",
+      token,
+      body: {
+        document: {
+          version: 1,
+          nodes: [
+            { id: "image-1", kind: "image", position: { x: 0, y: 0 }, data: { assets: [asset] } },
+            {
+              id: "gen-remote",
+              kind: "generator",
+              position: { x: 320, y: 0 },
+              data: { pluginId: "image-to-image", modelKey: remote.key, params: {} },
+            },
+          ],
+          edges: [
+            {
+              id: "edge-1",
+              source: "image-1",
+              sourceHandle: "out",
+              target: "gen-remote",
+              targetHandle: "slot:image",
+            },
+          ],
+          viewport: { x: 0, y: 0, zoom: 1 },
+        },
+      },
+    });
+
+    const remoteRun = await api(`/api/canvases/${remoteId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        nodeId: "gen-remote",
+        pluginId: "image-to-image",
+        modelKey: remote.key,
+        params: {},
+      },
+    });
+    check("the remote run is accepted", remoteRun.status === 202, `got ${remoteRun.status} ${JSON.stringify(remoteRun.payload?.error ?? "")}`);
+
+    const remoteFinal = await waitForRun(token, remoteRun.payload?.run?.id);
+    check(
+      "the remote run finishes",
+      remoteFinal?.status === "succeeded",
+      `status ${remoteFinal?.status} ${remoteFinal?.error ?? ""}`,
+    );
+    check(
+      "the remote result is not marked as a demo",
+      remoteFinal?.tasks?.[0]?.synthetic === false,
+      JSON.stringify(remoteFinal?.tasks?.[0]),
+    );
+    check(
+      "the remote run names the model it used",
+      remoteFinal?.modelKey === remote.key,
+      `${remoteFinal?.modelKey}`,
+    );
+  }
+}
 
 console.log(failures === 0 ? "\nAll checks passed." : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

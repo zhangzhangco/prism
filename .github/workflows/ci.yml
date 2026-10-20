@@ -80,3 +80,50 @@ jobs:
 
       - name: Check that an interrupted run recovers
         run: node scripts/recovery.mjs
+
+  remote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the server
+        run: pnpm --filter @prism/contracts build && pnpm --filter @prism/server build
+
+      - name: Start a stand-in image endpoint
+        run: |
+          node scripts/fake-openai.mjs &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4390/v1/images/generations -X POST \
+                 -H 'authorization: Bearer test-key' -H 'content-type: application/json' \
+                 -d '{"model":"gpt-image-1","prompt":"x"}' > /dev/null; then break; fi
+            sleep 1
+          done
+
+      - name: Start the server
+        run: |
+          PRISM_DATA_DIR=$RUNNER_TEMP/prism PRISM_PORT=4319 \
+            PRISM_OPENAI_API_KEY=test-key \
+            PRISM_OPENAI_BASE_URL=http://127.0.0.1:4390/v1 \
+            node apps/server/dist/index.js &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4319/api/health > /dev/null; then break; fi
+            sleep 1
+          done
+
+      - name: Run the smoke test against the remote endpoint
+        run: |
+          PRISM_OPENAI_BASE_URL=http://127.0.0.1:4390/v1 node scripts/smoke.mjs
+
+      - name: Check the adapter against the endpoint
+        run: node --test scripts/openai-adapter.test.mjs

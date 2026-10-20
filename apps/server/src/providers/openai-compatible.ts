@@ -1,23 +1,39 @@
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
-import { ProviderError, type GenerationProvider, type ProviderInputValue, type ProviderOutputAsset, type ProviderRequest, type ProviderResult, type ProviderTask } from "./types.js";
+import type { ModelDescriptor, ParamSpec } from "@prism/contracts";
+import {
+  ProviderError,
+  type GenerationProvider,
+  type ProviderInputValue,
+  type ProviderOutputAsset,
+  type ProviderRequest,
+  type ProviderResult,
+  type ProviderTask,
+} from "./types.js";
 
 /**
- * Adapter for any server that speaks the OpenAI image-generation dialect.
+ * Adapter for any server that speaks the OpenAI image dialect.
  *
- * Point `PRISM_OPENAI_BASE_URL` at a compatible endpoint and every plugin
- * bound to the `openai-compatible` model will be routed there.
+ * The families differ in ways that matter, so the request is shaped per
+ * model:
+ *
+ * - The GPT Image family returns base64 unconditionally and rejects the
+ *   legacy `response_format` field, so it is never sent. It also takes
+ *   `background` and `output_format`.
+ * - The DALL·E family expects `response_format` and knows only its own
+ *   quality names, and it cannot edit an image.
  */
 
-interface ChatCompletionResponse {
+interface ImageResponse {
   data?: Array<{ b64_json?: string; url?: string }>;
-  error?: { message?: string };
+  error?: { message?: string; type?: string; code?: string };
 }
 
 export interface OpenAiCompatibleOptions {
   baseUrl: string;
   apiKey: string;
-  model: string;
+  /** The models this endpoint serves. */
+  models: ModelDescriptor[];
   fetchImpl?: typeof fetch;
 }
 
@@ -29,7 +45,7 @@ export class OpenAiCompatibleProvider implements GenerationProvider {
   constructor(private readonly options: OpenAiCompatibleOptions) {}
 
   supports(modelKey: string): boolean {
-    return modelKey === "openai-image";
+    return this.options.models.some((model) => model.key === modelKey);
   }
 
   async submit(request: ProviderRequest): Promise<ProviderTask> {
@@ -48,27 +64,49 @@ export class OpenAiCompatibleProvider implements GenerationProvider {
     return result;
   }
 
+  private model(request: ProviderRequest): ModelDescriptor {
+    const model = this.options.models.find((candidate) => candidate.key === request.modelKey);
+    if (!model) {
+      throw new ProviderError(`This endpoint does not serve the model "${request.modelKey}"`);
+    }
+    return model;
+  }
+
   private async call(request: ProviderRequest): Promise<ProviderResult> {
     const doFetch = this.options.fetchImpl ?? fetch;
+    const model = this.model(request);
     const prompt = this.buildPrompt(request);
-    const count = typeof request.params.count === "number" ? request.params.count : 1;
     const references = this.referenceImages(request);
 
-    // A run with a reference image is an edit; without one it is a plain
-    // generation. The two use different endpoints on OpenAI-compatible
-    // servers, so the request is shaped to match.
-    const response = references.length
-      ? await this.callEdits(doFetch, request, prompt, count, references)
-      : await this.callGenerations(doFetch, request, prompt, count);
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
+    if (references.length > 0 && !model.supportsReference) {
       throw new ProviderError(
-        `Image endpoint responded with ${response.status}: ${body.slice(0, 300)}`,
+        `The model "${model.label}" cannot work from a reference image`,
       );
     }
 
-    const payload = (await response.json()) as ChatCompletionResponse;
+    // A stable key per run, so a provider that honours idempotency keys will
+    // not bill the same job twice when a run is repeated after a restart.
+    const idempotencyKey = `prism-${request.runId}-${request.taskKey}`;
+
+    const response = references.length
+      ? await this.callEdits(doFetch, request, model, prompt, references, idempotencyKey)
+      : await this.callGenerations(doFetch, request, model, prompt, idempotencyKey);
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      let message = `The image endpoint responded with ${response.status}`;
+      try {
+        const parsed = JSON.parse(body) as ImageResponse;
+        if (parsed.error?.message) {
+          message = parsed.error.message;
+        }
+      } catch {
+        if (body) message = `${message}: ${body.slice(0, 300)}`;
+      }
+      throw new ProviderError(message);
+    }
+
+    const payload = (await response.json()) as ImageResponse;
     if (payload.error?.message) {
       throw new ProviderError(payload.error.message);
     }
@@ -78,13 +116,13 @@ export class OpenAiCompatibleProvider implements GenerationProvider {
       if (item.b64_json) {
         assets.push({
           data: Buffer.from(item.b64_json, "base64"),
-          mime: "image/png",
+          mime: this.mimeFor(model, request),
           filename: `image-${index + 1}.png`,
         });
       } else if (item.url) {
         const downloaded = await doFetch(item.url);
         if (!downloaded.ok) {
-          throw new ProviderError(`Could not download generated image (${downloaded.status})`);
+          throw new ProviderError(`Could not download the generated image (${downloaded.status})`);
         }
         assets.push({
           data: Buffer.from(await downloaded.arrayBuffer()),
@@ -100,41 +138,78 @@ export class OpenAiCompatibleProvider implements GenerationProvider {
     return { status: "succeeded", assets };
   }
 
+  private mimeFor(model: ModelDescriptor, request: ProviderRequest): string {
+    const format = request.params.output_format;
+    if (model.dialect === "gpt-image" && typeof format === "string") {
+      if (format === "jpeg") return "image/jpeg";
+      if (format === "webp") return "image/webp";
+    }
+    return "image/png";
+  }
+
+  /** The fields the chosen model accepts, in its own vocabulary. */
+  private payloadFor(
+    model: ModelDescriptor,
+    request: ProviderRequest,
+    prompt: string,
+  ): Record<string, unknown> {
+    const params = request.params;
+    const payload: Record<string, unknown> = { model: model.key, prompt };
+
+    const count = params.count;
+    if (typeof count === "number") payload.n = count;
+
+    const size = params.size;
+    if (typeof size === "string") payload.size = size;
+
+    const quality = params.quality;
+    if (typeof quality === "string") payload.quality = quality;
+
+    if (model.dialect === "gpt-image") {
+      // The GPT Image family rejects `response_format`; it always returns
+      // base64, so the field is left out entirely.
+      if (typeof params.background === "string") payload.background = params.background;
+      if (typeof params.output_format === "string") payload.output_format = params.output_format;
+    } else {
+      payload.response_format = "b64_json";
+    }
+
+    return payload;
+  }
+
   private async callGenerations(
     doFetch: typeof fetch,
     request: ProviderRequest,
+    model: ModelDescriptor,
     prompt: string,
-    count: number,
+    idempotencyKey: string,
   ): Promise<Response> {
     return doFetch(`${this.baseUrl()}/images/generations`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.options.apiKey}`,
+        "Idempotency-Key": idempotencyKey,
       },
-      body: JSON.stringify({
-        model: this.options.model,
-        prompt,
-        n: Math.min(4, Math.max(1, count)),
-        size: typeof request.params.size === "string" ? request.params.size : "1024x1024",
-        quality: typeof request.params.quality === "string" ? request.params.quality : undefined,
-        response_format: "b64_json",
-      }),
+      body: JSON.stringify(this.payloadFor(model, request, prompt)),
     });
   }
 
   private async callEdits(
     doFetch: typeof fetch,
     request: ProviderRequest,
+    model: ModelDescriptor,
     prompt: string,
-    count: number,
     references: ProviderInputValue[],
+    idempotencyKey: string,
   ): Promise<Response> {
     const form = new FormData();
-    form.append("model", this.options.model);
+    for (const [key, value] of Object.entries(this.payloadFor(model, request, prompt))) {
+      if (key === "model" || key === "prompt") continue;
+      form.append(key, String(value));
+    }
+    form.append("model", model.key);
     form.append("prompt", prompt);
-    form.append("n", String(Math.min(4, Math.max(1, count))));
-    form.append("size", typeof request.params.size === "string" ? request.params.size : "1024x1024");
 
     for (const [index, reference] of references.entries()) {
       const localPath = reference.localPath;
@@ -145,7 +220,10 @@ export class OpenAiCompatibleProvider implements GenerationProvider {
 
     return doFetch(`${this.baseUrl()}/images/edits`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${this.options.apiKey}` },
+      headers: {
+        Authorization: `Bearer ${this.options.apiKey}`,
+        "Idempotency-Key": idempotencyKey,
+      },
       body: form,
     });
   }
@@ -166,10 +244,6 @@ export class OpenAiCompatibleProvider implements GenerationProvider {
       .filter((value) => value.kind === "image");
   }
 
-  private baseUrl(): string {
-    return this.options.baseUrl.replace(/\/$/, "");
-  }
-
   private buildPrompt(request: ProviderRequest): string {
     if (request.prompt.trim()) return request.prompt.trim();
 
@@ -182,4 +256,10 @@ export class OpenAiCompatibleProvider implements GenerationProvider {
       .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
     return texts.join(", ") || "an abstract scene";
   }
+
+  private baseUrl(): string {
+    return this.options.baseUrl.replace(/\/$/, "");
+  }
 }
+
+export type { ParamSpec };

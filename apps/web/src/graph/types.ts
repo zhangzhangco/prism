@@ -1,4 +1,4 @@
-import type { AssetRef, RunStatus } from "@prism/contracts";
+import type { AssetRef, DataType, RunStatus } from "@prism/contracts";
 import type { Edge, Node } from "@vue-flow/core";
 
 /**
@@ -24,9 +24,11 @@ export interface ImageNodeData {
   label?: string;
 }
 
-/** Payload of a generator node: the plugin it runs and its parameters. */
+/** Payload of a generator node: the plugin it runs, the model and its parameters. */
 export interface GeneratorNodeData {
   pluginId: string;
+  /** The model to run against. Defaults to the plugin's own. */
+  modelKey?: string;
   params: Record<string, unknown>;
   runId?: string;
   status?: RunStatus;
@@ -39,6 +41,10 @@ export interface ResultNodeData {
   runId?: string;
   label?: string;
   producerNodeId?: string;
+  /** True when the output came from the built-in demo backend. */
+  synthetic?: boolean;
+  /** The asset the wire carries when there is more than one. */
+  selectedAssetId?: string;
 }
 
 /** Every node kind carries one of these payloads. */
@@ -60,4 +66,27 @@ export function slotHandle(key: string): string {
 export function slotKeyFromHandle(handle: string): string {
   const match = /^slot:(.+)$/.exec(handle);
   return match?.[1] ?? handle;
+}
+
+/**
+ * The kind of value a node puts on its wire.
+ *
+ * The server refuses a run whose inputs do not match, but finding out at
+ * run time is late. Knowing the type here lets the canvas refuse a
+ * connection that could never work — a picture into a text slot, for
+ * instance.
+ */
+export function nodeDataType(node: FlowNode | undefined): DataType | null {
+  if (!node) return null;
+  switch (node.type) {
+    case "prompt":
+    case "text":
+      return "text";
+    case "image":
+    case "result":
+    case "stage":
+      return "image";
+    default:
+      return null;
+  }
 }

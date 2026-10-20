@@ -34,13 +34,12 @@ export interface ServerConfig {
   /** Enables the dev-only "bootstrap account" endpoint. */
   allowSignup: boolean;
   /**
-   * Optional OpenAI-compatible image endpoint. When set, plugins bound to
-   * the `openai-compatible` provider are routed there instead of the mock.
+   * Optional OpenAI-compatible image endpoint. When set, the models that
+   * endpoint serves become available and can be picked on a generator node.
    */
   openAiCompatible: {
     baseUrl: string;
     apiKey: string;
-    model: string;
   } | null;
 }
 
@@ -54,7 +53,6 @@ export function loadConfig(): ServerConfig {
     ? {
         baseUrl: process.env.PRISM_OPENAI_BASE_URL ?? "https://api.openai.com/v1",
         apiKey,
-        model: process.env.PRISM_OPENAI_MODEL ?? "gpt-image-1",
       }
     : null;
 

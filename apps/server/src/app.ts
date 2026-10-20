@@ -33,7 +33,10 @@ export async function buildServer(config: ServerConfig): Promise<PrismServer> {
 
   const plugins = builtinPlugins();
   const models = builtinModels({ hasRemoteProvider: config.openAiCompatible !== null });
-  const providers = new ProviderRegistry({ openAiCompatible: config.openAiCompatible });
+  const providers = new ProviderRegistry({
+    openAiCompatible: config.openAiCompatible,
+    models,
+  });
 
   const app = Fastify({
     logger: {
@@ -62,6 +65,7 @@ export async function buildServer(config: ServerConfig): Promise<PrismServer> {
     users,
     canvases,
     pluginById: (id) => plugins.find((plugin) => plugin.id === id),
+    modelById: (key) => models.find((model) => model.key === key),
   });
 
   const runner = new Runner({

@@ -23,18 +23,23 @@ import type {
  * - the model entries in the catalogue are labelled as a demo.
  */
 
-const RATIO_SIZES: Record<string, [number, number]> = {
-  "1:1": [1024, 1024],
-  "4:3": [1024, 768],
-  "3:4": [768, 1024],
-  "16:9": [1280, 720],
-  "9:16": [720, 1280],
-};
-
 const QUALITY_SCALE: Record<string, number> = {
   standard: 1,
   high: 1.5,
 };
+
+/** Parse a "1024x1024" size into pixels. */
+function parseSize(value: unknown): [number, number] {
+  if (typeof value === "string") {
+    const match = /^(\d+)x(\d+)$/.exec(value.trim());
+    if (match) {
+      const width = Number(match[1]);
+      const height = Number(match[2]);
+      if (width > 0 && height > 0) return [width, height];
+    }
+  }
+  return [1024, 1024];
+}
 
 interface Palette {
   from: [number, number, number];
@@ -211,11 +216,10 @@ export class MockProvider implements GenerationProvider {
       return { status: "succeeded", text: this.sculpt(request), synthetic: true };
     }
 
-    const ratio = typeof request.params.ratio === "string" ? request.params.ratio : "1:1";
     const quality = typeof request.params.quality === "string" ? request.params.quality : "standard";
     const count = clampCount(request.params.count);
     const factor = QUALITY_SCALE[quality] ?? 1;
-    const [baseWidth, baseHeight] = RATIO_SIZES[ratio] ?? RATIO_SIZES["1:1"]!;
+    const [baseWidth, baseHeight] = parseSize(request.params.size);
     const width = Math.max(64, Math.round(baseWidth * factor));
     const height = Math.max(64, Math.round(baseHeight * factor));
 

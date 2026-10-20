@@ -1,18 +1,19 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { assetPath } from "../storage.js";
 import { join } from "node:path";
-import type { RunStatus } from "@prism/contracts";
-import type { AssetRef } from "@prism/contracts";
+import type { AssetRef, PluginManifest, RunStatus } from "@prism/contracts";
 import type { ServerConfig } from "../config.js";
-import { assertInputsSatisfied, composePrompt, resolveInputs, GraphResolutionError } from "../graph.js";
+import { composePrompt } from "../graph.js";
 import { runLocal } from "../local/executors.js";
 import { readPngSize } from "../png.js";
 import type { ProviderRegistry } from "../providers/registry.js";
-import { ProviderError, type ProviderRequest, type ProviderTask } from "../providers/types.js";
+import { ProviderError, type ProviderInputValue, type ProviderRequest, type ProviderTask } from "../providers/types.js";
 import type { AssetsStore } from "../store/assets.js";
 import type { CanvasesStore } from "../store/canvases.js";
 import { toAssetRef } from "../store/assets.js";
+import { assetPath } from "../storage.js";
 import type { RunsStore } from "../store/runs.js";
+
+const MAX_ATTEMPTS = 3;
 
 /**
  * The generation runner.
@@ -22,8 +23,6 @@ import type { RunsStore } from "../store/runs.js";
  * rather than in memory: a restart loses no queued work, and the client can
  * always ask the server what happened.
  */
-const MAX_ATTEMPTS = 3;
-
 export class Runner {
   private running = false;
   private timer: NodeJS.Timeout | null = null;
@@ -36,7 +35,7 @@ export class Runner {
       canvases: CanvasesStore;
       assets: AssetsStore;
       providers: ProviderRegistry;
-      pluginById: (id: string) => ReturnType<typeof Object> | undefined;
+      pluginById: (id: string) => PluginManifest | undefined;
     },
   ) {}
 
@@ -54,12 +53,28 @@ export class Runner {
     this.timer.unref?.();
   }
 
+  async stop(): Promise<void> {
+    this.running = false;
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+    // Give in-flight work a chance to finish so we do not leave rows stuck in
+    // a "running" state.
+    const deadline = Date.now() + 5000;
+    while (this.active.size > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
   /**
    * Deal with runs that were in flight when the process stopped.
    *
    * A provider cannot be re-attached to, so an interrupted run is started
-   * again from the beginning. After a few attempts it is failed with a clear
-   * reason rather than being retried for ever.
+   * again from the beginning. The request carries an idempotency key, so a
+   * provider that honours one will not bill the same job twice. After a few
+   * attempts the run is failed with a clear reason rather than being retried
+   * for ever.
    */
   private recoverInterrupted(): void {
     const { runs } = this.deps;
@@ -81,20 +96,6 @@ export class Runner {
           .map((run) => run.id)
           .join(", ")}`,
       );
-    }
-  }
-
-  async stop(): Promise<void> {
-    this.running = false;
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
-    // Give in-flight work a chance to finish so we do not leave rows stuck in
-    // a "running" state.
-    const deadline = Date.now() + 5000;
-    while (this.active.size > 0 && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
 
@@ -135,25 +136,42 @@ export class Runner {
 
     runs.setStatus(runId, "running");
 
-    const resolved = resolveInputs(canvas.document, run.nodeId, plugin as never);
-    try {
-      assertInputsSatisfied(resolved);
-    } catch (error) {
-      const message =
-        error instanceof GraphResolutionError ? error.message : "Could not resolve the inputs";
-      runs.setStatus(runId, "failed", message);
+    // The inputs were resolved when the run was submitted, against the
+    // document as it stood then. Using that snapshot means a change made
+    // while the run was queued cannot alter what it consumes.
+    const snapshot = (run.inputs ?? {}) as Record<string, unknown>;
+    const resolved = Object.entries(snapshot).map(([key, values]) => ({
+      key,
+      values: Array.isArray(values) ? (values as ProviderInputValue[]) : [],
+    }));
+
+    const missing = plugin.inputs.find((slot) => {
+      if (!slot.required && !slot.min) return undefined;
+      const found = resolved.find((entry) => entry.key === slot.key);
+      const count = found?.values.length ?? 0;
+      return count < (slot.min ?? 1) ? slot : undefined;
+    });
+    if (missing) {
+      const found = resolved.find((entry) => entry.key === missing.key);
+      runs.setStatus(
+        runId,
+        "failed",
+        `The "${missing.label}" input needs at least ${missing.min ?? 1} value(s), got ${
+          found?.values.length ?? 0
+        }`,
+      );
       return;
     }
 
     const taskKey = plugin.outputs[0]?.key ?? "output";
-    const runtime = (plugin as { runtime: { kind: string; modelKey?: string } }).runtime;
+    const runtime = plugin.runtime;
 
     // Give providers a direct path to the bytes of every referenced image, so
     // they do not have to fetch it back over the network.
     const inputs = Object.fromEntries(
-      resolved.map((input) => [
-        input.slot.key,
-        input.values.map((value) => {
+      resolved.map((entry) => [
+        entry.key,
+        entry.values.map((value) => {
           if (value.kind !== "image" || !value.assetId) return value;
           const asset = assets.get(run.userId, value.assetId);
           if (!asset) return value;
@@ -165,11 +183,20 @@ export class Runner {
       ]),
     );
 
+    const prompt = composePrompt(
+      resolved.map((entry) => ({
+        slot: { key: entry.key, label: entry.key, dataType: "any" as const, required: false },
+        values: entry.values,
+        sources: [],
+      })),
+      run.params,
+    );
+
     // A local runtime runs in process and finishes immediately.
     if (runtime.kind === "local") {
       try {
         const result = await runLocal(plugin.id, {
-          prompt: composePrompt(resolved, run.params),
+          prompt,
           params: run.params,
           inputs,
         });
@@ -214,8 +241,8 @@ export class Runner {
     const request: ProviderRequest = {
       runId: run.id,
       taskKey,
-      modelKey: runtime.kind === "provider" ? (runtime.modelKey ?? "") : "",
-      prompt: composePrompt(resolved, run.params),
+      modelKey: run.modelKey,
+      prompt,
       params: run.params,
       inputs,
     };

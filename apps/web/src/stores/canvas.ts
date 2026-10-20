@@ -1,12 +1,13 @@
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 import type { Connection } from "@vue-flow/core";
-import type { AssetRef, CanvasDocument, Run, Viewport } from "@prism/contracts";
-import { documentFingerprint } from "@prism/contracts";
+import type { AssetRef, CanvasDocument, PluginManifest, Run, Viewport } from "@prism/contracts";
+import { documentFingerprint, effectiveParams, reconcileParams } from "@prism/contracts";
 import { api, ApiError } from "@/api/client";
 import { documentToEdges, documentToNodes, nodesToDocument } from "@/graph/convert";
 import { SOURCE_HANDLE, slotHandle, type FlowEdge, type FlowNode, type GeneratorNodeData } from "@/graph/types";
 import { defaultStage } from "@/stage/defaults";
+import { useCatalogStore } from "./index";
 
 let idCounter = 0;
 function localId(prefix: string): string {
@@ -16,6 +17,21 @@ function localId(prefix: string): string {
 }
 
 const SAVE_DEBOUNCE_MS = 600;
+
+/** A stand-in used when a plugin is unknown, so the code stays total. */
+const emptyPlugin: PluginManifest = {
+  id: "",
+  name: "",
+  version: "",
+  category: "",
+  summary: "",
+  icon: "",
+  inputs: [],
+  outputs: [{ key: "output", label: "Output", dataType: "any" }],
+  defaults: {},
+  runtime: { kind: "local" },
+  enabled: false,
+};
 
 export const useCanvasStore = defineStore("canvas", () => {
   const flowNodes = shallowRef<FlowNode[]>([]);
@@ -147,8 +163,10 @@ export const useCanvasStore = defineStore("canvas", () => {
     const data: Record<string, unknown> = { text: "" };
     if (kind === "image" || kind === "result") data.assets = [];
     if (kind === "generator") {
+      const plugin = useCatalogStore().pluginById.get("text-to-image");
       data.pluginId = "text-to-image";
-      data.params = { ratio: "1:1" };
+      data.modelKey = plugin?.runtime.kind === "provider" ? plugin.runtime.modelKey : undefined;
+      data.params = { ...(plugin?.defaults ?? {}) };
     }
     if (kind === "stage") {
       data.stage = defaultStage();
@@ -216,6 +234,23 @@ export const useCanvasStore = defineStore("canvas", () => {
     scheduleSave();
   }
 
+  /** Switch a generator to another model, dropping parameters it cannot take. */
+  function setModel(nodeId: string, modelKey: string): void {
+    const node = flowNodes.value.find((item) => item.id === nodeId);
+    if (!node) return;
+    const data = node.data as unknown as GeneratorNodeData;
+    const plugin = useCatalogStore().pluginById.get(data.pluginId);
+    const model = useCatalogStore().models.find((candidate) => candidate.key === modelKey);
+    const specs = effectiveParams(plugin ?? emptyPlugin, model);
+    node.data = {
+      ...(node.data ?? {}),
+      modelKey,
+      params: reconcileParams(specs, data.params ?? {}),
+    };
+    flowNodes.value = [...flowNodes.value];
+    scheduleSave();
+  }
+
   /**
    * Start a generation and follow it until it settles.
    *
@@ -248,25 +283,22 @@ export const useCanvasStore = defineStore("canvas", () => {
 
   async function startRun(nodeId: string, data: GeneratorNodeData) {
     const canvasId = currentId.value!;
+    const body = {
+      nodeId,
+      pluginId: data.pluginId,
+      modelKey: data.modelKey,
+      params: data.params ?? {},
+      documentFingerprint: fingerprint.value,
+    };
     try {
-      return await api.startRun(canvasId, {
-        nodeId,
-        pluginId: data.pluginId,
-        params: data.params ?? {},
-        documentFingerprint: fingerprint.value,
-      });
+      return await api.startRun(canvasId, body);
     } catch (cause) {
       // The graph on the server was older than the one on screen. Save and
       // try once more before giving up.
       if (cause instanceof ApiError && cause.code === "stale_document") {
         dirty.value = true;
         await saveNow();
-        return api.startRun(canvasId, {
-          nodeId,
-          pluginId: data.pluginId,
-          params: data.params ?? {},
-          documentFingerprint: fingerprint.value,
-        });
+        return api.startRun(canvasId, body);
       }
       throw cause;
     }
@@ -406,6 +438,7 @@ export const useCanvasStore = defineStore("canvas", () => {
     removeNode,
     updateNodeData,
     setParam,
+    setModel,
     run,
     reset,
   };

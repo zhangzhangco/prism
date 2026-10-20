@@ -6,6 +6,68 @@
  * breaks compilation on both sides at once instead of at runtime.
  */
 
+/**
+ * The parameters a generator node shows.
+ *
+ * The selected model contributes the parameters the backend accepts, and the
+ * plugin contributes any of its own — a free-text prompt, for instance. When
+ * both define the same key, the model's definition wins.
+ */
+export function effectiveParams(
+  plugin: PluginManifest,
+  model: ModelDescriptor | undefined,
+): ParamSpec[] {
+  const pluginParams = plugin.outputs[0]?.params ?? [];
+  const modelParams = model?.params ?? [];
+
+  const ordered: ParamSpec[] = [];
+  for (const spec of modelParams) ordered.push(spec);
+  for (const spec of pluginParams) {
+    if (!modelParams.some((candidate) => candidate.key === spec.key)) ordered.push(spec);
+  }
+  return ordered;
+}
+
+/**
+ * Drop the values a model would refuse and fill in its defaults.
+ *
+ * Used when the model changes: the parameters kept from the previous model
+ * may not be valid for the new one.
+ */
+export function reconcileParams(
+  specs: ParamSpec[],
+  current: Record<string, unknown>,
+): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const spec of specs) {
+    const given = current[spec.key];
+    if (given === undefined) {
+      if (spec.default !== undefined) values[spec.key] = spec.default;
+      continue;
+    }
+    if (spec.type === "enum") {
+      const allowed = (spec.options ?? []).some((option) => option.value === given);
+      if (allowed) values[spec.key] = given;
+      else if (spec.default !== undefined) values[spec.key] = spec.default;
+      continue;
+    }
+    if (spec.type === "number" && typeof given === "number" && Number.isFinite(given)) {
+      values[spec.key] = given;
+      continue;
+    }
+    if (spec.type === "boolean" && typeof given === "boolean") {
+      values[spec.key] = given;
+      continue;
+    }
+    if (spec.type === "string" && typeof given === "string") {
+      values[spec.key] = given;
+      continue;
+    }
+    if (spec.default !== undefined) values[spec.key] = spec.default;
+  }
+  return values;
+}
+
 /* ------------------------------------------------------------------ *
  * Primitives
  * ------------------------------------------------------------------ */
@@ -20,7 +82,7 @@ export interface ParamOption {
   label: string;
 }
 
-/** A user-configurable knob on a plugin output. */
+/** A parameter the user can change on a generator node. */
 export interface ParamSpec {
   key: string;
   label: string;
@@ -52,12 +114,19 @@ export interface SlotSpec {
   help?: string;
 }
 
-/** A produced value, together with the parameters that shape it. */
+/**
+ * A produced value.
+ *
+ * The parameters a user can change come from the selected model. A plugin may
+ * add parameters of its own — a free-text prompt, for instance — which are
+ * shown alongside the model's. When both define the same key, the model's
+ * definition wins, because it knows which values the backend accepts.
+ */
 export interface OutputSpec {
   key: string;
   label: string;
   dataType: DataType;
-  params: ParamSpec[];
+  params?: ParamSpec[];
 }
 
 export type PluginRuntime =
@@ -208,13 +277,27 @@ export interface AssetRef {
  * Models
  * ------------------------------------------------------------------ */
 
+/**
+ * The request conventions of a model.
+ *
+ * Different image APIs accept different fields. The GPT Image family ignores
+ * the legacy `response_format` and returns base64 unconditionally, while
+ * the DALL·E family wants `response_format` and only understands its own
+ * quality names. The adapter switches on this.
+ */
+export type ModelDialect = "mock" | "gpt-image" | "dall-e" | "generic";
+
 export interface ModelDescriptor {
   key: string;
   provider: string;
   label: string;
   mediaType: DataType;
+  dialect: ModelDialect;
+  /** The parameters this model accepts, with the values it allows. */
   params: ParamSpec[];
   enabled: boolean;
+  /** True when the model can be given a reference image. */
+  supportsReference: boolean;
 }
 
 /* ------------------------------------------------------------------ *
@@ -243,6 +326,8 @@ export interface Run {
   canvasId: string;
   nodeId: string;
   pluginId: string;
+  /** The model the run was submitted against. */
+  modelKey: string;
   status: RunStatus;
   params: Record<string, unknown>;
   tasks: RunTask[];
@@ -287,6 +372,8 @@ export interface ApiError {
 export interface RunRequest {
   nodeId: string;
   pluginId: string;
+  /** The model to run against. Defaults to the plugin's own. */
+  modelKey?: string;
   params?: Record<string, unknown>;
   /** Values for each input slot, keyed by slot key. */
   inputs?: Record<string, unknown>;

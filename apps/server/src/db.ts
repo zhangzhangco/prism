@@ -84,6 +84,10 @@ const MIGRATIONS: string[] = [
   ALTER TABLE runs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE runs ADD COLUMN recovered_at TEXT;
   `,
+  `
+  ALTER TABLE runs ADD COLUMN model_key TEXT NOT NULL DEFAULT '';
+  ALTER TABLE runs ADD COLUMN inputs TEXT;
+  `,
 ];
 
 export function openDatabase(config: ServerConfig): Db {

@@ -3,36 +3,15 @@ import type { PluginManifest } from "@prism/contracts";
 /**
  * The built-in plugin catalog.
  *
- * A plugin is a declarative description of a generator: what it consumes, what
- * it produces, and which knobs the user can turn. The runtime behaviour comes
- * from the provider the plugin is bound to, so adding a new generator means
- * adding a manifest and (optionally) a provider — never touching the canvas.
+ * A plugin is a declarative description of a generator: the input slots it
+ * consumes, the output it produces, and which model it runs by default. The
+ * runtime behaviour comes from the provider the model is bound to, so adding
+ * a new generator means adding a manifest and (optionally) a provider — never
+ * touching the canvas.
+ *
+ * The parameters a user can change come from the model, so a plugin only
+ * declares the ones it owns, such as the free-text prompt.
  */
-
-const RATIO_PARAM = {
-  key: "ratio",
-  label: "Aspect ratio",
-  type: "enum" as const,
-  default: "1:1",
-  options: [
-    { value: "1:1", label: "1:1" },
-    { value: "4:3", label: "4:3" },
-    { value: "3:4", label: "3:4" },
-    { value: "16:9", label: "16:9" },
-    { value: "9:16", label: "9:16" },
-  ],
-};
-
-const STRENGTH_PARAM = {
-  key: "strength",
-  label: "Strength",
-  type: "number" as const,
-  default: 0.65,
-  min: 0.1,
-  max: 1,
-  step: 0.05,
-  help: "How far the result may drift from the reference image.",
-};
 
 const PROMPT_PARAM = {
   key: "prompt",
@@ -66,10 +45,10 @@ export function builtinPlugins(): PluginManifest[] {
           key: "images",
           label: "Images",
           dataType: "image",
-          params: [RATIO_PARAM, PROMPT_PARAM],
+          params: [PROMPT_PARAM],
         },
       ],
-      defaults: { ratio: "1:1", prompt: "" },
+      defaults: {},
       runtime: { kind: "provider", modelKey: "prism-diffusion-v1" },
       enabled: true,
     },
@@ -103,10 +82,10 @@ export function builtinPlugins(): PluginManifest[] {
           key: "images",
           label: "Images",
           dataType: "image",
-          params: [RATIO_PARAM, STRENGTH_PARAM, PROMPT_PARAM],
+          params: [PROMPT_PARAM],
         },
       ],
-      defaults: { ratio: "1:1", strength: 0.65, prompt: "" },
+      defaults: {},
       runtime: { kind: "provider", modelKey: "prism-diffusion-v1" },
       enabled: true,
     },
@@ -148,7 +127,7 @@ export function builtinPlugins(): PluginManifest[] {
       ],
       defaults: { factor: "2x" },
       // Resampling happens in process, so the result is a real enlargement of
-      // the source rather than a model approximation.
+      // the source rather than a model approximation. It needs no model.
       runtime: { kind: "local" },
       enabled: true,
     },
@@ -174,7 +153,28 @@ export function builtinPlugins(): PluginManifest[] {
           key: "text",
           label: "Text",
           dataType: "text",
-          params: [],
+          params: [
+            {
+              key: "tone",
+              label: "Tone",
+              type: "enum",
+              default: "descriptive",
+              options: [
+                { value: "descriptive", label: "Descriptive" },
+                { value: "concise", label: "Concise" },
+                { value: "cinematic", label: "Cinematic" },
+              ],
+            },
+            {
+              key: "maxWords",
+              label: "Max words",
+              type: "number",
+              default: 120,
+              min: 20,
+              max: 400,
+              step: 10,
+            },
+          ],
         },
       ],
       defaults: {},

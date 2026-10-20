@@ -12,7 +12,7 @@
     "dev": "pnpm --filter @prism/contracts build && pnpm --parallel --filter \"./apps/*\" dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm --filter @prism/contracts build && pnpm -r typecheck",
-    "test": "pnpm --filter @prism/contracts build && pnpm -r test",
+    "test": "pnpm --filter @prism/contracts build && pnpm --filter @prism/server test && node --test scripts/*.test.mjs",
     "db:migrate": "pnpm --filter @prism/server db:migrate",
     "smoke": "pnpm --filter @prism/contracts build && node scripts/smoke.mjs",
     "test:recovery": "pnpm --filter @prism/contracts build && pnpm --filter @prism/server build && node scripts/recovery.mjs"

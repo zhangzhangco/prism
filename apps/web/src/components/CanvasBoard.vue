@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { VueFlow, useVueFlow, type Connection } from "@vue-flow/core";
+import { VueFlow, useVueFlow, type Connection, type Edge } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
 import { MiniMap } from "@vue-flow/minimap";
 import { onMounted, watch } from "vue";
+import type { DataType } from "@prism/contracts";
+import { useCatalogStore } from "@/stores";
 import { useCanvasStore } from "@/stores/canvas";
+import { nodeDataType } from "@/graph/types";
+import type { FlowNode } from "@/graph/types";
 import PromptNode from "@/nodes/PromptNode.vue";
 import TextNode from "@/nodes/TextNode.vue";
 import ImageNode from "@/nodes/ImageNode.vue";
@@ -13,7 +17,45 @@ import ResultNode from "@/nodes/ResultNode.vue";
 import StageNode from "@/nodes/StageNode.vue";
 
 const canvas = useCanvasStore();
+const catalog = useCatalogStore();
 const { fitView, setViewport, viewport, onInit } = useVueFlow();
+
+/** The type of value a generator puts on its wire. */
+function generatorOutputType(node: FlowNode | undefined): DataType | null {
+  if (!node || node.type !== "generator") return null;
+  const pluginId = (node.data as { pluginId?: string })?.pluginId;
+  const plugin = pluginId ? catalog.pluginById.get(pluginId) : undefined;
+  return plugin?.outputs[0]?.dataType ?? null;
+}
+
+/** The type a target handle accepts, read from the plugin's slot. */
+function slotType(node: FlowNode | undefined, handle: string | null): DataType | null {
+  if (!node || !handle) return null;
+  if (node.type !== "generator") return null;
+  const pluginId = (node.data as { pluginId?: string })?.pluginId;
+  const plugin = pluginId ? catalog.pluginById.get(pluginId) : undefined;
+  const key = handle.startsWith("slot:") ? handle.slice(5) : handle;
+  const slot = plugin?.inputs.find((candidate) => candidate.key === key);
+  return slot?.dataType ?? null;
+}
+
+/**
+ * Refuse a connection that could never carry anything.
+ *
+ * A picture cannot feed a text slot, and a generator can only feed a slot
+ * that accepts what it produces.
+ */
+function isValidConnection(connection: Connection | Edge): boolean {
+  const source = canvas.flowNodes.find((node) => node.id === connection.source);
+  const target = canvas.flowNodes.find((node) => node.id === connection.target);
+  if (!source || !target) return false;
+
+  const produced = nodeDataType(source) ?? generatorOutputType(source);
+  const accepted = slotType(target, connection.targetHandle ?? null);
+  if (!produced || !accepted) return true;
+
+  return produced === accepted || accepted === "any";
+}
 
 function onConnect(connection: Connection): void {
   canvas.connect(connection);
@@ -83,6 +125,7 @@ onInit(() => {
       :max-zoom="2"
       :snap-to-grid="true"
       :snap-grid="[8, 8]"
+      :is-valid-connection="isValidConnection"
       @connect="onConnect"
       @node-drag-stop="onNodeDragStop"
       @pane-click="onPaneClick"
